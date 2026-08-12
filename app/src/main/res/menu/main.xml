@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_airplane_cycle"
+        android:title="@string/menu_airplane_cycle"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_release_assistant"
+        android:title="@string/menu_release_assistant"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_clear_log"
+        android:title="@string/menu_clear_log"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_settings"
+        android:title="@string/settings_title"
+        app:showAsAction="never" />
+</menu>

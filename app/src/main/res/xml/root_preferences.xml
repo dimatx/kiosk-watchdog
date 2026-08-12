@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.preference.PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="@string/cat_probe">
+        <EditTextPreference
+            app:defaultValue="192.168.27.40"
+            app:key="probe_host"
+            app:title="@string/pref_probe_host" />
+        <EditTextPreference
+            app:defaultValue="8123"
+            app:key="probe_port"
+            app:title="@string/pref_probe_port" />
+        <EditTextPreference
+            app:defaultValue="20"
+            app:key="check_interval_sec"
+            app:title="@string/pref_interval" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cat_escalation">
+        <EditTextPreference
+            app:defaultValue="60"
+            app:key="t_reassociate_sec"
+            app:title="@string/pref_t_reassociate" />
+        <EditTextPreference
+            app:defaultValue="120"
+            app:key="t_soft_sec"
+            app:title="@string/pref_t_soft" />
+        <EditTextPreference
+            app:defaultValue="240"
+            app:key="t_hard_sec"
+            app:title="@string/pref_t_hard" />
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="hard_reset_enabled"
+            app:summary="@string/pref_hard_enabled_summary"
+            app:title="@string/pref_hard_enabled" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cat_airplane">
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="airplane_enabled"
+            app:summary="@string/pref_airplane_enabled_summary"
+            app:title="@string/pref_airplane_enabled" />
+        <EditTextPreference
+            app:defaultValue="360"
+            app:key="t_airplane_sec"
+            app:summary="@string/pref_t_airplane_summary"
+            app:title="@string/pref_t_airplane" />
+        <EditTextPreference
+            app:defaultValue="15"
+            app:key="airplane_dwell_sec"
+            app:summary="@string/pref_airplane_dwell_summary"
+            app:title="@string/pref_airplane_dwell" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cat_reporting">
+        <EditTextPreference
+            app:key="webhook_url"
+            app:summary="@string/pref_webhook_summary"
+            app:title="@string/pref_webhook" />
+    </PreferenceCategory>
+</androidx.preference.PreferenceScreen>

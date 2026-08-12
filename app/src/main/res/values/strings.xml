@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Wi-Fi Watchdog</string>
+    <string name="settings_title">Settings</string>
+
+    <string name="channel_name">Watchdog status</string>
+    <string name="channel_description">Keeps the connectivity monitor running.</string>
+
+    <string name="status_online">Connected</string>
+    <string name="status_offline">No connectivity</string>
+    <string name="status_paused">Paused</string>
+
+    <string name="status_detail_online">Reaching %1$s:%2$d</string>
+    <string name="status_detail_offline">Down for %1$s</string>
+    <string name="status_detail_offline_full">Cannot reach %1$s — down for %2$s</string>
+    <string name="status_detail_paused">Monitoring is switched off.</string>
+
+    <string name="wifi_unknown">Wi-Fi status unknown</string>
+    <string name="wifi_off">Wi-Fi radio is off</string>
+    <string name="wifi_not_associated">Not associated with any network</string>
+    <string name="wifi_details">%1$s · %2$s dBm · %3$s Mbps</string>
+
+    <string name="last_check">Last check %1$s ago</string>
+    <string name="last_check_never">No check yet</string>
+
+    <string name="enabled_label">Watchdog enabled</string>
+    <string name="recover_now">Recover now</string>
+    <string name="open_settings">Settings</string>
+    <string name="activity_header">Activity</string>
+    <string name="no_events">Nothing logged yet.</string>
+
+    <string name="permission_title">Full recovery is disabled</string>
+    <string name="permission_body">Grant WRITE_SECURE_SETTINGS over adb to allow a complete Wi-Fi driver reload. Without it the watchdog can only do a soft Wi-Fi toggle.</string>
+    <string name="copy_command">Copy adb command</string>
+    <string name="copied">Command copied</string>
+
+    <string name="recover_title">Run recovery now?</string>
+    <string name="recover_message">This drops the Wi-Fi radio for several seconds and brings it back. Any active connection — including adb over Wi-Fi — will be interrupted.</string>
+    <string name="recover_confirm">Run it</string>
+    <string name="recover_started">Recovery started</string>
+
+    <string name="menu_clear_log">Clear log</string>
+    <string name="menu_airplane_cycle">Airplane-mode cycle</string>
+    <string name="menu_release_assistant">Release assistant slot</string>
+
+    <string name="airplane_title">Cycle airplane mode?</string>
+    <string name="airplane_message">Every radio goes off for %1$d seconds and then back on. The device will be completely unreachable during that window — including adb over Wi-Fi. A failsafe alarm turns it back off even if this app is killed.</string>
+    <string name="airplane_confirm">Cycle it</string>
+    <string name="airplane_started">Airplane cycle started</string>
+    <string name="airplane_unavailable">Needs WRITE_SECURE_SETTINGS — grant it over adb first</string>
+
+    <string name="assistant_not_owned">The app does not currently hold the assistant slot</string>
+    <string name="assistant_released">Assistant slot released</string>
+    <string name="assistant_release_failed">Could not release the assistant slot</string>
+
+    <!-- Settings screen -->
+    <string name="cat_probe">Connectivity check</string>
+    <string name="pref_probe_host">Probe host</string>
+    <string name="pref_probe_port">Probe port</string>
+    <string name="pref_interval">Check interval (seconds)</string>
+
+    <string name="cat_escalation">Recovery ladder</string>
+    <string name="pref_t_reassociate">Re-associate after (seconds down)</string>
+    <string name="pref_t_soft">Wi-Fi off/on after (seconds down)</string>
+    <string name="pref_t_hard">Full driver reload after (seconds down)</string>
+    <string name="pref_hard_enabled">Allow full driver reload</string>
+    <string name="pref_hard_enabled_summary">Uses WRITE_SECURE_SETTINGS to unload and reload the Wi-Fi driver — the airplane-mode equivalent.</string>
+
+    <string name="cat_airplane">Airplane-mode cycle</string>
+    <string name="pref_airplane_enabled">Allow airplane-mode cycle</string>
+    <string name="pref_airplane_enabled_summary">Last resort. Turns every radio off and on through the assistant channel — the only rootless way to trigger a real airplane-mode toggle.</string>
+    <string name="pref_t_airplane">Airplane cycle after (seconds down)</string>
+    <string name="pref_t_airplane_summary">How long the link must stay down before the heaviest rung runs.</string>
+    <string name="pref_airplane_dwell">Airplane dwell (seconds)</string>
+    <string name="pref_airplane_dwell_summary">How long to stay in airplane mode before switching back.</string>
+
+    <string name="cat_reporting">Reporting</string>
+    <string name="pref_webhook">Home Assistant webhook URL</string>
+    <string name="pref_webhook_summary">Optional. Receives a JSON POST when the link drops, recovers, or is reset.</string>
+</resources>

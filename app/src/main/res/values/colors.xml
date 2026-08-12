@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="status_ok">#2E7D32</color>
+    <color name="status_bad">#C62828</color>
+    <color name="status_warn">#EF6C00</color>
+    <color name="status_action">#1565C0</color>
+    <color name="status_paused">#757575</color>
+    <color name="icon_background">#0B3D91</color>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declaration for AssistantService.
+
+  Android 8.1's VoiceInteractionServiceInfo parser treats a missing
+  sessionService or recognitionService as a hard error, so both must be
+  present and fully qualified. supportsAssist is deliberately left off — the
+  system only consults it for the assist gesture, not for deciding which
+  service may become the current interactor.
+-->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:recognitionService="com.shymoose.wifiwatchdog.StubRecognitionService"
+    android:sessionService="com.shymoose.wifiwatchdog.AssistantSessionService"
+    android:supportsAssist="false" />
