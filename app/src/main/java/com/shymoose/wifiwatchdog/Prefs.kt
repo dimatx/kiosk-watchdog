@@ -9,16 +9,37 @@ class Prefs(context: Context) {
 
     private val sp: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(context)
 
+    init {
+        // Older builds shipped a hard-coded probe host and the settings screen persisted it,
+        // so clear that value once to hand the probe back to gateway auto-detection.
+        if (!sp.getBoolean(KEY_GATEWAY_MIGRATED, false)) {
+            val editor = sp.edit().putBoolean(KEY_GATEWAY_MIGRATED, true)
+            if (sp.getString(KEY_PROBE_HOST, "")?.trim() == LEGACY_HOST) {
+                editor.putString(KEY_PROBE_HOST, "")
+            }
+            editor.apply()
+        }
+    }
+
     var enabled: Boolean
         get() = sp.getBoolean(KEY_ENABLED, true)
         set(value) = sp.edit().putBoolean(KEY_ENABLED, value).apply()
 
-    val probeHost: String
-        get() = sp.getString(KEY_PROBE_HOST, DEFAULT_HOST)!!.trim().ifEmpty { DEFAULT_HOST }
+    /** Blank means "follow the default gateway"; anything else pins the probe. */
+    val probeHostOverride: String
+        get() = sp.getString(KEY_PROBE_HOST, DEFAULT_HOST)!!.trim()
 
     val probePort: Int
         get() = sp.getString(KEY_PROBE_PORT, DEFAULT_PORT)!!.toIntOrNull()?.coerceIn(1, 65535)
             ?: DEFAULT_PORT.toInt()
+
+    /**
+     * Last gateway seen while the link was up. Discovery returns nothing once the
+     * route table is torn down, which is precisely when the watchdog needs a target.
+     */
+    var lastGateway: String
+        get() = sp.getString(KEY_LAST_GATEWAY, "")!!
+        set(value) = sp.edit().putString(KEY_LAST_GATEWAY, value).apply()
 
     val checkIntervalSec: Int
         get() = intPref(KEY_INTERVAL, DEFAULT_INTERVAL, 10, 600)
@@ -84,8 +105,14 @@ class Prefs(context: Context) {
         private const val KEY_LAST_GOOD = "last_good_at"
         private const val KEY_AIRPLANE_PENDING = "airplane_pending"
         private const val KEY_PREV_ASSISTANT = "previous_assistant"
+        private const val KEY_LAST_GATEWAY = "last_gateway"
+        private const val KEY_GATEWAY_MIGRATED = "gateway_probe_migrated"
 
-        const val DEFAULT_HOST = "192.168.27.40"
+        /** Probe host baked into builds before gateway auto-detection existed. */
+        private const val LEGACY_HOST = "192.168.27.40"
+
+        /** Empty on purpose: auto-follow the gateway unless the user pins a host. */
+        const val DEFAULT_HOST = ""
         const val DEFAULT_PORT = "8123"
         const val DEFAULT_INTERVAL = 20
         const val DEFAULT_T_REASSOCIATE = 60

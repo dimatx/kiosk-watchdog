@@ -10,10 +10,16 @@
     <string name="status_offline">No connectivity</string>
     <string name="status_paused">Paused</string>
 
-    <string name="status_detail_online">Reaching %1$s:%2$d</string>
+    <string name="status_detail_online">Reaching %1$s</string>
     <string name="status_detail_offline">Down for %1$s</string>
     <string name="status_detail_offline_full">Cannot reach %1$s — down for %2$s</string>
     <string name="status_detail_paused">Monitoring is switched off.</string>
+
+    <string name="probe_target">%1$s (%2$s)</string>
+    <string name="probe_target_none">no gateway known</string>
+    <string name="probe_source_gateway">gateway</string>
+    <string name="probe_source_last_gateway">last known gateway</string>
+    <string name="probe_source_configured">configured</string>
 
     <string name="wifi_unknown">Wi-Fi status unknown</string>
     <string name="wifi_off">Wi-Fi radio is off</string>
@@ -56,7 +62,9 @@
     <!-- Settings screen -->
     <string name="cat_probe">Connectivity check</string>
     <string name="pref_probe_host">Probe host</string>
+    <string name="pref_probe_host_summary">Leave blank to follow the Wi-Fi gateway automatically.</string>
     <string name="pref_probe_port">Probe port</string>
+    <string name="pref_probe_port_summary">Only used when a probe host is set; gateway checks use ICMP.</string>
     <string name="pref_interval">Check interval (seconds)</string>
 
     <string name="cat_escalation">Recovery ladder</string>

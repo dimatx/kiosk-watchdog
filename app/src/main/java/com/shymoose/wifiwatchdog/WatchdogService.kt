@@ -126,12 +126,12 @@ class WatchdogService : Service() {
         val now = System.currentTimeMillis()
         if (prefs.lastGoodAtMillis == 0L) prefs.lastGoodAtMillis = now
 
-        val host = prefs.probeHost
-        val port = prefs.probePort
-        val reachable = probe.canReach(host, port)
+        val target = probe.resolveTarget(prefs)
+        val reachable = target != null && probe.canReach(target)
         State.lastCheckAt = now
         State.wifi = probe.status()
         State.online = reachable
+        val label = describeTarget(this, target)
 
         if (reachable) {
             if (State.stage > 0 || State.consecutiveFailures > 0) {
@@ -145,7 +145,7 @@ class WatchdogService : Service() {
             State.backoffSec = INITIAL_BACKOFF_SEC
             State.nextHardResetAt = 0L
             State.summary = getString(R.string.status_online)
-            State.detail = getString(R.string.status_detail_online, host, port)
+            State.detail = getString(R.string.status_detail_online, label)
             return
         }
 
@@ -155,7 +155,7 @@ class WatchdogService : Service() {
         State.detail = getString(R.string.status_detail_offline, formatDuration(downSec))
 
         if (State.consecutiveFailures == 1) {
-            EventLog.add(this, EventLevel.WARN, "Cannot reach $host:$port")
+            EventLog.add(this, EventLevel.WARN, "Cannot reach $label")
             report("lost", 0)
         }
 
@@ -391,6 +391,19 @@ class WatchdogService : Service() {
             seconds < 60 -> "${seconds}s"
             seconds < 3600 -> "${seconds / 60}m ${seconds % 60}s"
             else -> "${seconds / 3600}h ${(seconds % 3600) / 60}m"
+        }
+
+        /** Human label for a probe target, e.g. "192.168.27.1 (gateway)". */
+        fun describeTarget(context: Context, target: ProbeTarget?): String {
+            if (target == null) return context.getString(R.string.probe_target_none)
+            val source = context.getString(
+                when (target.source) {
+                    ProbeTarget.Source.GATEWAY -> R.string.probe_source_gateway
+                    ProbeTarget.Source.LAST_GATEWAY -> R.string.probe_source_last_gateway
+                    ProbeTarget.Source.CONFIGURED -> R.string.probe_source_configured
+                }
+            )
+            return context.getString(R.string.probe_target, target.host, source)
         }
     }
 }

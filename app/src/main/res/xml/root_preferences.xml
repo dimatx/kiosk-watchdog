@@ -3,12 +3,14 @@
 
     <PreferenceCategory app:title="@string/cat_probe">
         <EditTextPreference
-            app:defaultValue="192.168.27.40"
+            app:defaultValue=""
             app:key="probe_host"
+            app:summary="@string/pref_probe_host_summary"
             app:title="@string/pref_probe_host" />
         <EditTextPreference
             app:defaultValue="8123"
             app:key="probe_port"
+            app:summary="@string/pref_probe_port_summary"
             app:title="@string/pref_probe_port" />
         <EditTextPreference
             app:defaultValue="20"

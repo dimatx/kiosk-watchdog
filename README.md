@@ -9,8 +9,8 @@ which intermittently drops off Wi-Fi and never recovers by itself.
 
 ## What it does
 
-A foreground service probes a host on the LAN on a fixed interval. When probes fail,
-a timer starts and recovery escalates:
+A foreground service probes the network's default gateway on a fixed interval. When
+probes fail, a timer starts and recovery escalates:
 
 | Down for | Action |
 |---|---|
@@ -21,6 +21,23 @@ a timer starts and recovery escalates:
 
 After that it backs off, preferring the airplane cycle, doubling from 5 minutes to a
 30-minute cap. Every action is written to an on-device activity log.
+
+## Probe target
+
+The probe follows the Wi-Fi network's default gateway, discovered from
+`LinkProperties` (with a `DhcpInfo` fallback). This is deliberate: the gateway is the
+nearest host that can answer, so a failed probe means the *link* is broken rather than
+some remote service being down. Probing a fixed service host would let, say, a Home
+Assistant restart trigger a destructive airplane cycle.
+
+The gateway is checked with ICMP (`/system/bin/ping`) first, because a router usually
+has no open TCP port and a TCP-first probe would burn the whole timeout every cycle. A
+TCP connect to port 53 is the backup, and a *refused* connection counts as reachable —
+a refusal still proves packets made the round trip.
+
+The last known gateway is remembered, since route discovery returns nothing once the
+route table is torn down — exactly when the watchdog needs a target. Setting a probe
+host in Settings pins the probe to that host and port instead.
 
 ## Why airplane mode is special
 
@@ -72,9 +89,10 @@ The `ExpiredTargetSdkVersion` lint error is expected and suppressed at build tim
 
 ## Settings
 
-Probe host and port, check interval, escalation thresholds, airplane dwell time,
-whether the airplane rung is allowed at all, and an optional Home Assistant webhook
-that receives `{"event", "down_seconds", "stage"}` on each action.
+Probe host (blank = follow the gateway) and port, check interval, escalation
+thresholds, airplane dwell time, whether the airplane rung is allowed at all, and an
+optional Home Assistant webhook that receives `{"event", "down_seconds", "stage"}` on
+each action.
 
 ## Safety
 

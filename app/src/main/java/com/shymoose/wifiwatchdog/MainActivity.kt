@@ -25,6 +25,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
     private lateinit var adapter: EventAdapter
     private lateinit var recovery: WifiRecovery
+    private lateinit var probe: NetProbe
 
     private val handler = Handler(Looper.getMainLooper())
     private val logListener: () -> Unit = { handler.post { refresh() } }
@@ -43,6 +44,7 @@ class MainActivity : AppCompatActivity() {
 
         prefs = Prefs(this)
         recovery = WifiRecovery(this)
+        probe = NetProbe(this)
 
         adapter = EventAdapter()
         binding.eventList.layoutManager = LinearLayoutManager(this)
@@ -150,9 +152,9 @@ class MainActivity : AppCompatActivity() {
         binding.statusDetail.text = if (!enabled) {
             getString(R.string.status_detail_paused)
         } else {
-            val target = "${prefs.probeHost}:${prefs.probePort}"
+            val target = WatchdogService.describeTarget(this, probe.resolveTarget(prefs))
             if (online) {
-                getString(R.string.status_detail_online, prefs.probeHost, prefs.probePort)
+                getString(R.string.status_detail_online, target)
             } else {
                 val down = if (prefs.lastGoodAtMillis > 0) {
                     (System.currentTimeMillis() - prefs.lastGoodAtMillis) / 1000

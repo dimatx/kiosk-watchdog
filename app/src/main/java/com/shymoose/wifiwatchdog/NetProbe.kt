@@ -5,8 +5,10 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import java.io.IOException
+import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.TimeUnit
 
 data class WifiStatus(
     val wifiEnabled: Boolean,
@@ -15,6 +17,13 @@ data class WifiStatus(
     val rssi: Int?,
     val linkSpeedMbps: Int?
 )
+
+/** Where the reachability check is pointed, and why. */
+data class ProbeTarget(val host: String, val port: Int, val source: Source) {
+    enum class Source { GATEWAY, LAST_GATEWAY, CONFIGURED }
+
+    override fun toString(): String = "$host:$port"
+}
 
 /**
  * "Is the link actually usable" check. A Wi-Fi association alone is not enough —
@@ -35,18 +44,98 @@ class NetProbe(private val context: Context) {
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 
-    /** Opens a TCP socket to [host]:[port]. Blocking — never call on the main thread. */
-    fun canReach(host: String, port: Int, timeoutMs: Int = 5_000): Boolean = try {
+    /**
+     * The default-route gateway of the active network, or null when there is no
+     * usable route. Preferred over any fixed address: it follows the device onto
+     * whatever network it joins and is the nearest host that can answer, so a
+     * failure means the link itself is dead rather than some remote service.
+     */
+    fun gateway(): String? {
+        runCatching {
+            val network = connectivity.activeNetwork ?: return@runCatching null
+            connectivity.getLinkProperties(network)
+                ?.routes
+                ?.firstOrNull { it.isDefaultRoute }
+                ?.gateway
+                ?.hostAddress
+                ?.takeIf { it.isNotBlank() && it != "0.0.0.0" && it != "::" }
+        }.getOrNull()?.let { return it }
+
+        // DHCP lease. Deprecated, but it survives cases where the route table has
+        // already been torn down mid-failure.
+        @Suppress("DEPRECATION")
+        return runCatching {
+            val raw = wifi.dhcpInfo?.gateway ?: 0
+            if (raw == 0) null else formatIpv4(raw)
+        }.getOrNull()
+    }
+
+    /**
+     * True when packets provably reached [target]. ICMP is tried first because the
+     * gateway rarely listens on a TCP port; a TCP connect is the backup. A refused
+     * connection counts as success — the peer answered, which is the whole question.
+     */
+    fun canReach(target: ProbeTarget, timeoutMs: Int = 5_000): Boolean =
+        ping(target.host, timeoutMs) || tcpReach(target.host, target.port, timeoutMs)
+
+    private fun ping(host: String, timeoutMs: Int): Boolean = try {
+        val waitSec = (timeoutMs / 1000).coerceIn(1, 10)
+        val process = ProcessBuilder(PING, "-n", "-c", "1", "-W", waitSec.toString(), host)
+            .redirectErrorStream(true)
+            .start()
+        val finished = process.waitFor(waitSec.toLong() + 2, TimeUnit.SECONDS)
+        if (!finished) {
+            process.destroy()
+            false
+        } else {
+            process.exitValue() == 0
+        }
+    } catch (e: IOException) {
+        false
+    } catch (e: InterruptedException) {
+        Thread.currentThread().interrupt()
+        false
+    } catch (e: SecurityException) {
+        false
+    }
+
+    private fun tcpReach(host: String, port: Int, timeoutMs: Int): Boolean = try {
         Socket().use { socket ->
             socket.connect(InetSocketAddress(host, port), timeoutMs)
             true
         }
+    } catch (e: ConnectException) {
+        // "Connection refused" means the packet made the round trip.
+        e.message?.contains("refused", ignoreCase = true) == true
     } catch (e: IOException) {
         false
     } catch (e: SecurityException) {
         false
     } catch (e: IllegalArgumentException) {
         false
+    }
+
+    private fun formatIpv4(raw: Int): String =
+        "${raw and 0xFF}.${raw shr 8 and 0xFF}.${raw shr 16 and 0xFF}.${raw shr 24 and 0xFF}"
+
+    /**
+     * Chooses what to probe. The live gateway wins; if discovery fails — which is
+     * exactly what happens once the link drops — the last gateway seen is reused so
+     * the watchdog keeps a meaningful target while offline. A host pinned in
+     * settings overrides both. Null means no target is known yet.
+     */
+    fun resolveTarget(prefs: Prefs): ProbeTarget? {
+        val configured = prefs.probeHostOverride
+        if (configured.isNotEmpty()) {
+            return ProbeTarget(configured, prefs.probePort, ProbeTarget.Source.CONFIGURED)
+        }
+        gateway()?.let { gw ->
+            if (gw != prefs.lastGateway) prefs.lastGateway = gw
+            return ProbeTarget(gw, GATEWAY_PORT, ProbeTarget.Source.GATEWAY)
+        }
+        return prefs.lastGateway
+            .takeIf { it.isNotEmpty() }
+            ?.let { ProbeTarget(it, GATEWAY_PORT, ProbeTarget.Source.LAST_GATEWAY) }
     }
 
     @Suppress("DEPRECATION")
@@ -62,5 +151,12 @@ class NetProbe(private val context: Context) {
             rssi = info?.rssi?.takeIf { it != -127 && ssid != null },
             linkSpeedMbps = info?.linkSpeed?.takeIf { it > 0 && ssid != null }
         )
+    }
+
+    companion object {
+        private const val PING = "/system/bin/ping"
+
+        /** TCP backup port for a gateway. Routers answer DNS far more often than HTTP. */
+        const val GATEWAY_PORT = 53
     }
 }
