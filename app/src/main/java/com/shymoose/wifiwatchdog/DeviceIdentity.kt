@@ -57,6 +57,11 @@ object DeviceIdentity {
         )
     }
 
+    /**
+     * The name shown in notifications. This is the system device name, which is
+     * settable from Settings (or `settings put global device_name`), so renaming
+     * the display renames it here too.
+     */
     fun hostname(context: Context): String {
         val name = runCatching {
             Settings.Global.getString(context.contentResolver, "device_name")

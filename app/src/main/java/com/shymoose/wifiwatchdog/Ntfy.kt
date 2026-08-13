@@ -214,5 +214,5 @@ object Ntfy {
 
     /** Queued messages can arrive much later, so events carry their own clock. */
     fun timestamp(at: Long): String =
-        SimpleDateFormat("MMM d HH:mm:ss", Locale.US).format(Date(at))
+        SimpleDateFormat("MMM d, h:mm a z", Locale.US).format(Date(at))
 }
