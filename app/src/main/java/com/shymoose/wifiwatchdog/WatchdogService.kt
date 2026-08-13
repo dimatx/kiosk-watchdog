@@ -14,9 +14,6 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -33,6 +30,9 @@ class WatchdogService : Service() {
     private lateinit var probe: NetProbe
     private lateinit var recovery: WifiRecovery
     private var wifiLock: WifiManager.WifiLock? = null
+
+    /** Last probe target, quoted in notifications raised from the escalation ladder. */
+    private var lastTargetLabel: String = "?"
 
     override fun onCreate() {
         super.onCreate()
@@ -60,6 +60,8 @@ class WatchdogService : Service() {
             ACTION_FORCE_AIRPLANE -> runOnWorker(coalesce = false, wakeMs = WAKE_TIMEOUT_LONG_MS) {
                 forceAirplaneCycle()
             }
+
+            ACTION_SEND_TEST -> runOnWorker(coalesce = false) { sendTestNotification() }
 
             else -> {
                 if (State.startedAt == 0L) {
@@ -132,6 +134,7 @@ class WatchdogService : Service() {
         State.wifi = probe.status()
         State.online = reachable
         val label = describeTarget(this, target)
+        lastTargetLabel = label
 
         if (reachable) {
             if (State.stage > 0 || State.consecutiveFailures > 0) {
@@ -139,6 +142,8 @@ class WatchdogService : Service() {
                 EventLog.add(this, EventLevel.INFO, "Connectivity restored after ${formatDuration(downFor)}")
                 report("recovered", downFor)
             }
+            // The link is up: this is the only moment queued notifications can go out.
+            Ntfy.flush(this)
             prefs.lastGoodAtMillis = now
             State.consecutiveFailures = 0
             State.stage = 0
@@ -224,24 +229,77 @@ class WatchdogService : Service() {
         recovery.airplaneCycle()
     }
 
-    // ----------------------------------------------------------- HA reporting
+    // -------------------------------------------------------- ntfy reporting
 
+    /**
+     * Every event is queued rather than sent inline: all of them except recovery
+     * happen while the link is down, so an inline POST could never succeed and
+     * would only stall the recovery ladder behind a socket timeout. The queue is
+     * drained on the next successful probe.
+     */
     private fun report(event: String, downSeconds: Long) {
-        val url = prefs.webhookUrl
-        if (url.isEmpty()) return
-        runCatching {
-            val body = """{"event":"$event","down_seconds":$downSeconds,"stage":${State.stage}}"""
-            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 5_000
-                readTimeout = 5_000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-            }
-            OutputStreamWriter(conn.outputStream).use { it.write(body) }
-            conn.responseCode
-            conn.disconnect()
+        if (!prefs.ntfyConfigured) return
+        val at = System.currentTimeMillis()
+        val id = DeviceIdentity.snapshot(this)
+
+        val (title, priority, tags) = when (event) {
+            "lost" -> Triple(getString(R.string.ntfy_title_lost), Ntfy.PRIORITY_HIGH, "warning")
+            "hard_reset" -> Triple(
+                getString(R.string.ntfy_title_hard_reset),
+                Ntfy.PRIORITY_HIGH,
+                "arrows_counterclockwise"
+            )
+            "airplane_cycle" -> Triple(
+                getString(R.string.ntfy_title_airplane),
+                Ntfy.PRIORITY_URGENT,
+                "rotating_light"
+            )
+            "recovered" -> Triple(
+                getString(R.string.ntfy_title_recovered),
+                Ntfy.PRIORITY_DEFAULT,
+                "white_check_mark"
+            )
+            else -> Triple(
+                getString(R.string.ntfy_title_test),
+                Ntfy.PRIORITY_DEFAULT,
+                "white_check_mark"
+            )
         }
+
+        val lines = mutableListOf(
+            id.oneLine(),
+            getString(R.string.ntfy_line_when, Ntfy.timestamp(at))
+        )
+        if (event == "recovered") {
+            lines.add(getString(R.string.ntfy_line_down_for, formatDuration(downSeconds)))
+        } else if (downSeconds > 0) {
+            lines.add(getString(R.string.ntfy_line_down_since, formatDuration(downSeconds)))
+        }
+        if (event != "test") {
+            lines.add(getString(R.string.ntfy_line_stage, State.stage))
+            lines.add(getString(R.string.ntfy_line_target, lastTargetLabel))
+        }
+
+        Ntfy.enqueue(
+            this,
+            Ntfy.Message(
+                title = "$title — ${id.hostname}",
+                body = lines.joinToString("\n"),
+                priority = priority,
+                tags = tags,
+                at = at
+            )
+        )
+    }
+
+    private fun sendTestNotification() {
+        if (!prefs.ntfyConfigured) {
+            EventLog.add(this, EventLevel.ERROR, getString(R.string.log_ntfy_unconfigured))
+            return
+        }
+        EventLog.add(this, EventLevel.ACTION, getString(R.string.log_ntfy_test))
+        report("test", 0)
+        Ntfy.flush(this, force = true)
     }
 
     // ------------------------------------------------------------- scheduling
@@ -331,6 +389,7 @@ class WatchdogService : Service() {
         const val ACTION_STOP = "com.shymoose.wifiwatchdog.STOP"
         const val ACTION_FORCE_HARD_RESET = "com.shymoose.wifiwatchdog.FORCE_HARD_RESET"
         const val ACTION_FORCE_AIRPLANE = "com.shymoose.wifiwatchdog.FORCE_AIRPLANE"
+        const val ACTION_SEND_TEST = "com.shymoose.wifiwatchdog.SEND_TEST"
 
         private const val CHANNEL_ID = "watchdog"
         private const val NOTIFICATION_ID = 1001

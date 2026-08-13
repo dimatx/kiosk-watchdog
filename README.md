@@ -90,9 +90,39 @@ The `ExpiredTargetSdkVersion` lint error is expected and suppressed at build tim
 ## Settings
 
 Probe host (blank = follow the gateway) and port, check interval, escalation
-thresholds, airplane dwell time, whether the airplane rung is allowed at all, and an
-optional Home Assistant webhook that receives `{"event", "down_seconds", "stage"}` on
-each action.
+thresholds, airplane dwell time, whether the airplane rung is allowed at all, and the
+ntfy notification settings.
+
+## Notifications (ntfy)
+
+Four fields: **server URL** (defaults to `https://ntfy.sh`), **topic**, **username**
+and **password**. Only the topic is required — leave it blank to disable notifications
+entirely. With a username the password is sent as HTTP basic auth; without one it is
+sent as a bearer token, so an ntfy access token works in the password field alone.
+
+Every notification body carries the event time plus the device's hostname, IP and MAC:
+
+```
+Wi-Fi restored — starfire
+starfire · 192.168.27.227 · 94:08:53:2a:fb:75
+Occurred: Aug 12 18:23:17
+Down for: 2m 23s
+Stage: 3
+Probe target: 192.168.27.1 (last known gateway)
+```
+
+Because every event except recovery happens **while the link is down**, messages are
+never posted inline — that could not succeed and would stall the recovery ladder behind
+a socket timeout. They are written to a persistent outbox and flushed on the next
+successful probe, oldest first. A delayed message gains a
+`Queued while offline, delivered …` line so the original timestamp is never ambiguous.
+The outbox holds 25 messages, discards anything older than 24 hours, and backs off 60
+seconds after a failed attempt. IP and MAC are cached whenever they are readable so an
+outage report can still identify the device once the interface is gone; a cached value
+is marked `(last known)`.
+
+**Send test notification** in Settings publishes immediately and records the outcome in
+the event log.
 
 ## Safety
 

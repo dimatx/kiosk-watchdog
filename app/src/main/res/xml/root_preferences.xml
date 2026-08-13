@@ -58,8 +58,25 @@
 
     <PreferenceCategory app:title="@string/cat_reporting">
         <EditTextPreference
-            app:key="webhook_url"
-            app:summary="@string/pref_webhook_summary"
-            app:title="@string/pref_webhook" />
+            app:defaultValue="https://ntfy.sh"
+            app:key="ntfy_url"
+            app:summary="@string/pref_ntfy_url_summary"
+            app:title="@string/pref_ntfy_url" />
+        <EditTextPreference
+            app:key="ntfy_topic"
+            app:summary="@string/pref_ntfy_topic_summary"
+            app:title="@string/pref_ntfy_topic" />
+        <EditTextPreference
+            app:key="ntfy_user"
+            app:summary="@string/pref_ntfy_user_summary"
+            app:title="@string/pref_ntfy_user" />
+        <EditTextPreference
+            app:key="ntfy_password"
+            app:summary="@string/pref_ntfy_password_summary"
+            app:title="@string/pref_ntfy_password" />
+        <Preference
+            app:key="ntfy_test"
+            app:summary="@string/pref_ntfy_test_summary"
+            app:title="@string/pref_ntfy_test" />
     </PreferenceCategory>
 </androidx.preference.PreferenceScreen>

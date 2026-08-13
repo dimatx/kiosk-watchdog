@@ -19,6 +19,11 @@ class Prefs(context: Context) {
             }
             editor.apply()
         }
+        // Reporting moved from a Home Assistant webhook to ntfy; drop the dead value
+        // so it stops occupying the preference store on upgraded installs.
+        if (sp.contains(KEY_LEGACY_WEBHOOK)) {
+            sp.edit().remove(KEY_LEGACY_WEBHOOK).apply()
+        }
     }
 
     var enabled: Boolean
@@ -78,8 +83,34 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_PREV_ASSISTANT, "")!!
         set(value) = sp.edit().putString(KEY_PREV_ASSISTANT, value).apply()
 
-    val webhookUrl: String
-        get() = sp.getString(KEY_WEBHOOK, "")!!.trim()
+    /** ntfy server root, e.g. https://ntfy.sh or a self-hosted instance. */
+    val ntfyUrl: String
+        get() = sp.getString(KEY_NTFY_URL, DEFAULT_NTFY_URL)!!.trim()
+            .ifEmpty { DEFAULT_NTFY_URL }
+
+    val ntfyTopic: String
+        get() = sp.getString(KEY_NTFY_TOPIC, "")!!.trim()
+
+    val ntfyUser: String
+        get() = sp.getString(KEY_NTFY_USER, "")!!.trim()
+
+    /** Password for basic auth, or an access token when no username is set. */
+    val ntfyPassword: String
+        get() = sp.getString(KEY_NTFY_PASSWORD, "")!!
+
+    /** The topic is what makes reporting possible; the server always has a default. */
+    val ntfyConfigured: Boolean
+        get() = ntfyTopic.isNotEmpty()
+
+    /** Last IPv4 seen while the link was up, for reporting during an outage. */
+    var lastIp: String
+        get() = sp.getString(KEY_LAST_IP, "")!!
+        set(value) = sp.edit().putString(KEY_LAST_IP, value).apply()
+
+    /** Cached once discovered; the hardware address does not change. */
+    var lastMac: String
+        get() = sp.getString(KEY_LAST_MAC, "")!!
+        set(value) = sp.edit().putString(KEY_LAST_MAC, value).apply()
 
     /** Persisted so a reboot mid-outage does not reset the escalation history. */
     var lastGoodAtMillis: Long
@@ -101,11 +132,18 @@ class Prefs(context: Context) {
         const val KEY_T_AIRPLANE = "t_airplane_sec"
         const val KEY_AIRPLANE_ENABLED = "airplane_enabled"
         const val KEY_AIRPLANE_DWELL = "airplane_dwell_sec"
-        const val KEY_WEBHOOK = "webhook_url"
+        const val KEY_NTFY_URL = "ntfy_url"
+        const val KEY_NTFY_TOPIC = "ntfy_topic"
+        const val KEY_NTFY_USER = "ntfy_user"
+        const val KEY_NTFY_PASSWORD = "ntfy_password"
+        const val KEY_NTFY_TEST = "ntfy_test"
+        private const val KEY_LEGACY_WEBHOOK = "webhook_url"
         private const val KEY_LAST_GOOD = "last_good_at"
         private const val KEY_AIRPLANE_PENDING = "airplane_pending"
         private const val KEY_PREV_ASSISTANT = "previous_assistant"
         private const val KEY_LAST_GATEWAY = "last_gateway"
+        private const val KEY_LAST_IP = "last_ip"
+        private const val KEY_LAST_MAC = "last_mac"
         private const val KEY_GATEWAY_MIGRATED = "gateway_probe_migrated"
 
         /** Probe host baked into builds before gateway auto-detection existed. */
@@ -114,6 +152,7 @@ class Prefs(context: Context) {
         /** Empty on purpose: auto-follow the gateway unless the user pins a host. */
         const val DEFAULT_HOST = ""
         const val DEFAULT_PORT = "8123"
+        const val DEFAULT_NTFY_URL = "https://ntfy.sh"
         const val DEFAULT_INTERVAL = 20
         const val DEFAULT_T_REASSOCIATE = 60
         const val DEFAULT_T_SOFT = 120

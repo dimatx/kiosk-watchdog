@@ -82,7 +82,29 @@
     <string name="pref_airplane_dwell">Airplane dwell (seconds)</string>
     <string name="pref_airplane_dwell_summary">How long to stay in airplane mode before switching back.</string>
 
-    <string name="cat_reporting">Reporting</string>
-    <string name="pref_webhook">Home Assistant webhook URL</string>
-    <string name="pref_webhook_summary">Optional. Receives a JSON POST when the link drops, recovers, or is reset.</string>
+    <string name="cat_reporting">Notifications (ntfy)</string>
+    <string name="pref_ntfy_url">Server URL</string>
+    <string name="pref_ntfy_url_summary">Base URL of the ntfy server. Defaults to https://ntfy.sh.</string>
+    <string name="pref_ntfy_topic">Topic</string>
+    <string name="pref_ntfy_topic_summary">Required. Leave blank to disable notifications entirely.</string>
+    <string name="pref_ntfy_user">Username</string>
+    <string name="pref_ntfy_user_summary">Optional. Leave blank for an open topic, or when using an access token.</string>
+    <string name="pref_ntfy_password">Password or access token</string>
+    <string name="pref_ntfy_password_summary">Optional. Sent as basic auth with a username, or as a bearer token without one.</string>
+    <string name="pref_ntfy_test">Send test notification</string>
+    <string name="pref_ntfy_test_summary">Publishes a message straight away and records the result in the event log.</string>
+
+    <string name="ntfy_title_lost">Wi-Fi down</string>
+    <string name="ntfy_title_hard_reset">Wi-Fi driver reset</string>
+    <string name="ntfy_title_airplane">Airplane-mode cycle</string>
+    <string name="ntfy_title_recovered">Wi-Fi restored</string>
+    <string name="ntfy_title_test">Watchdog test</string>
+    <string name="ntfy_line_when">Occurred: %1$s</string>
+    <string name="ntfy_line_down_for">Down for: %1$s</string>
+    <string name="ntfy_line_down_since">Down: %1$s so far</string>
+    <string name="ntfy_line_stage">Stage: %1$d</string>
+    <string name="ntfy_line_target">Probe target: %1$s</string>
+    <string name="log_ntfy_test">Test notification queued</string>
+    <string name="log_ntfy_unconfigured">Set an ntfy topic first</string>
+    <string name="toast_ntfy_test">Test queued — check the event log</string>
 </resources>
