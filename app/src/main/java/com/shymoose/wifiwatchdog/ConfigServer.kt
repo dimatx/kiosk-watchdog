@@ -15,6 +15,7 @@ import java.net.BindException
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import org.json.JSONObject
 
 /**
  * A throwaway HTTP server for editing settings from a desktop browser.
@@ -177,6 +178,25 @@ object ConfigServer {
             method == "POST" && path == "/action" -> {
                 val message = action(context, parse(body)["a"].orEmpty())
                 redirect(out, message)
+            }
+
+            method == "POST" && path == "/import" -> {
+                // curl posts raw JSON; the browser form posts it urlencoded in "json".
+                val trimmed = body.trimStart()
+                val raw = if (trimmed.startsWith("{")) trimmed else parse(body)["json"].orEmpty()
+                redirect(out, importJson(context, raw))
+            }
+
+            path == "/export" -> {
+                val json = exportJson(context)
+                val bytes = json.toByteArray(Charsets.UTF_8).size
+                out.write(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n" +
+                        "Content-Disposition: attachment; filename=\"${exportFilename(context)}\"\r\n" +
+                        "Content-Length: $bytes\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+                )
+                out.write(json)
+                out.flush()
             }
 
             path == "/" -> respond(out, page(context, query["m"]))
@@ -370,6 +390,108 @@ object ConfigServer {
         rebuild.postDelayed(task, 1500)
     }
 
+    // ------------------------------------------------------------- Backup
+
+    /** Bumped only if the key set ever changes shape enough to need migrating. */
+    private const val FORMAT = 1
+
+    /**
+     * Every user-visible setting, and nothing else. Runtime bookkeeping (last-seen
+     * timestamps, the ntfy outbox, the saved assistant slot) is deliberately left
+     * out so a config file can be dropped onto a second display unchanged.
+     */
+    private fun exportJson(context: Context): String {
+        val sp = PreferenceManager.getDefaultSharedPreferences(context)
+        val json = JSONObject()
+        json.put("_format", FORMAT)
+        json.put("device_name", DeviceIdentity.hostname(context))
+        json.put(Prefs.KEY_ENABLED, Prefs(context).enabled)
+        for (field in FIELDS) {
+            when (field.kind) {
+                Kind.BOOL -> json.put(field.key, sp.getBoolean(field.key, field.def == "true"))
+                else -> json.put(field.key, sp.getString(field.key, field.def).orEmpty())
+            }
+        }
+        return json.toString(2)
+    }
+
+    private fun exportFilename(context: Context): String {
+        val name = DeviceIdentity.hostname(context)
+            .lowercase()
+            .replace(Regex("[^a-z0-9._-]"), "-")
+            .trim('-')
+        return "wifi-watchdog-" + name.ifEmpty { "config" } + ".json"
+    }
+
+    /**
+     * Applies whatever it recognises and ignores the rest, so a file exported by a
+     * newer build still imports cleanly. Numbers are written as strings on purpose:
+     * the settings screen reads them back through `EditTextPreference`, which would
+     * throw on a real Int.
+     */
+    private fun importJson(context: Context, raw: String): String {
+        val text = raw.trim()
+        if (text.isEmpty()) return "Nothing to import."
+        val json = runCatching { JSONObject(text) }.getOrNull()
+            ?: return "That does not look like a config file."
+
+        val editor = PreferenceManager.getDefaultSharedPreferences(context).edit()
+        var applied = 0
+        var unknown = 0
+        var note = ""
+
+        for (key in json.keys()) {
+            if (key.startsWith("_")) continue
+            val value = json.opt(key)?.toString().orEmpty().trim()
+            when {
+                key == "device_name" -> {
+                    if (value.isEmpty()) continue
+                    val ok = runCatching {
+                        Settings.Global.putString(context.contentResolver, "device_name", value)
+                    }.getOrDefault(false)
+                    if (ok) applied++ else note = " Device name needs the WRITE_SECURE_SETTINGS grant."
+                }
+
+                key == Prefs.KEY_ENABLED -> {
+                    editor.putBoolean(key, truthy(value))
+                    applied++
+                }
+
+                else -> {
+                    val field = FIELDS.firstOrNull { it.key == key }
+                    when {
+                        field == null -> unknown++
+                        field.kind == Kind.BOOL -> {
+                            editor.putBoolean(key, truthy(value))
+                            applied++
+                        }
+                        // Blank means "keep what is stored", matching the form.
+                        field.kind == Kind.PASSWORD -> if (value.isNotEmpty()) {
+                            editor.putString(key, value)
+                            applied++
+                        }
+
+                        else -> {
+                            editor.putString(key, value)
+                            applied++
+                        }
+                    }
+                }
+            }
+        }
+
+        editor.apply()
+        scheduleRebuild(context)
+
+        val ignored = if (unknown == 0) "" else " Ignored $unknown unrecognised key${plural(unknown)}."
+        return "Imported $applied setting${plural(applied)}.$ignored$note"
+    }
+
+    private fun plural(count: Int): String = if (count == 1) "" else "s"
+
+    private fun truthy(value: String): Boolean =
+        value == "1" || value.equals("true", ignoreCase = true)
+
     // ---------------------------------------------------------------- View
 
     private enum class Kind { TEXT, NUMBER, PASSWORD, BOOL }
@@ -551,6 +673,19 @@ object ConfigServer {
         sb.append(actionButton("heartbeat", "Send heartbeat now"))
         sb.append(actionButton("restart", "Restart watchdog"))
         sb.append("</section>")
+        sb.append("<section><h2>Backup</h2>")
+        sb.append("<a class=\"btn\" href=\"/export\" download>Download config JSON</a>")
+        sb.append("<small>Contains the ntfy password in plain text. ")
+            .append("Change <code>device_name</code> before importing onto another display.</small>")
+        sb.append("<form method=\"post\" action=\"/import\">")
+        sb.append("<label><span>Restore from JSON</span>")
+        sb.append("<input type=\"file\" id=\"pick\" accept=\".json,application/json\">")
+        sb.append("<textarea id=\"paste\" name=\"json\" rows=\"7\" ")
+            .append("placeholder=\"Choose a file above, or paste the JSON here\"></textarea>")
+        sb.append("<small>Unrecognised keys are ignored. ")
+            .append("Leave the password blank to keep the one already stored.</small></label>")
+        sb.append("<button type=\"submit\">Import and restart watchdog</button></form>")
+        sb.append("</section>")
         sb.append("</div>")
 
         sb.append("<p class=\"foot\">This page closes itself about ")
@@ -637,6 +772,15 @@ object ConfigServer {
         button{width:100%;padding:12px;border:0;border-radius:10px;background:#2f81f7;
                color:#fff;font-size:15px;font-weight:600;cursor:pointer}
         button.ghost{background:#21262d;color:#e6e8ea;font-weight:500}
+        a.btn{display:block;padding:12px;border-radius:10px;background:#21262d;
+              color:#e6e8ea;font-size:15px;font-weight:500;text-align:center;
+              text-decoration:none}
+        textarea{width:100%;padding:9px 11px;border:1px solid #30363d;border-radius:9px;
+                 background:#0d1117;color:#e6e8ea;resize:vertical;
+                 font:13px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}
+        textarea:focus{outline:2px solid #2f81f7;outline-offset:-1px}
+        input[type=file]{width:100%;margin:0 0 9px;color:#9ca3af;font-size:13px}
+        code{font:12px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:#c9d1d9}
         .inline{margin:0 0 8px}
         .actions{margin-top:24px}
         .tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 18px}
@@ -713,6 +857,18 @@ object ConfigServer {
               }).catch(function () {
                 flag(input, 'Not saved', false);
               });
+            });
+          }
+
+          var pick = document.getElementById('pick');
+          var paste = document.getElementById('paste');
+          if (pick && paste && window.FileReader) {
+            pick.addEventListener('change', function () {
+              var file = this.files && this.files[0];
+              if (!file) return;
+              var reader = new FileReader();
+              reader.onload = function () { paste.value = reader.result; };
+              reader.readAsText(file);
             });
           }
         })();

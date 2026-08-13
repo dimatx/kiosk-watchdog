@@ -3,4 +3,16 @@
     <style name="Theme.WifiWatchdog" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="preferenceTheme">@style/PreferenceThemeOverlay</item>
     </style>
+
+    <!--
+        The toolbar paints itself with colorPrimary, so its icons have to be tinted
+        for a dark background the way the title already is. Only the icon-tint
+        attributes are overridden: colorOnSurface and textColorPrimary are left alone
+        so the overflow menu text stays readable against the popup background.
+    -->
+    <style name="ThemeOverlay.WifiWatchdog.Toolbar" parent="">
+        <item name="colorControlNormal">?attr/colorOnPrimary</item>
+        <item name="colorOnSurfaceVariant">?attr/colorOnPrimary</item>
+        <item name="android:textColorSecondary">?attr/colorOnPrimary</item>
+    </style>
 </resources>

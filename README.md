@@ -90,7 +90,7 @@ out across five tabs — **General**, **Probe**, **Recovery**, **Reporting** and
   inline confirmation. No Save button to hunt for. (With JavaScript disabled the form
   falls back to a plain Save button and still works.)
 - **Tools tab** fires a test notification, a test heartbeat, or a manual airplane-mode
-  cycle.
+  cycle, and exports or imports the whole configuration as JSON.
 - **Restarts are debounced**, so tabbing through several fields reschedules the
   watchdog once, not once per keystroke.
 
@@ -102,6 +102,38 @@ checkbox clears it.
 > Treat it as a trusted-LAN convenience, not an admin panel: there is no
 > authentication, so anyone on the same network can change the settings during that
 > five-minute window.
+
+### Cloning settings to another display
+
+The **Tools** tab has a Backup section for moving a working configuration onto a second
+device instead of retyping it.
+
+- **Download config JSON** saves every setting to a file.
+- **Restore from JSON** takes a file (or pasted text) and applies it, then restarts the
+  watchdog.
+
+Two things to know before you import:
+
+- The export **contains the ntfy password in plain text** — it has to, or the clone
+  would come up unauthenticated. Store the file accordingly. On import, a blank
+  password leaves whatever is already stored untouched.
+- `device_name` is in the file. **Edit it before importing onto another display**, or
+  both devices end up with the same name.
+
+Unrecognised keys are ignored rather than rejected, so a file from an older version
+still imports and the response tells you how many keys were skipped.
+
+Scripting it is a one-liner:
+
+```bash
+curl http://192.168.1.42:8080/export -o display.json
+
+# edit device_name, then push it to the next display
+curl -X POST --data-urlencode json@display.json http://192.168.1.43:8080/import
+```
+
+Prefer `--data-urlencode` over `--data-binary`: it keeps the request body ASCII, which
+avoids a byte/character mismatch in the tiny built-in HTTP server.
 
 ---
 
