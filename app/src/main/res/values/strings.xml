@@ -38,6 +38,10 @@
     <string name="permission_title">Full recovery is disabled</string>
     <string name="permission_body">Grant WRITE_SECURE_SETTINGS over adb to allow a complete Wi-Fi driver reload. Without it the watchdog can only do a soft Wi-Fi toggle.</string>
     <string name="copy_command">Copy adb command</string>
+    <string name="battery_title">Checks may be delayed</string>
+    <string name="battery_body">Android\'s Doze mode throttles background alarms to about one every 15 minutes while the screen is off, which delays both Wi-Fi checks and heartbeats. Exempt the app to keep it on schedule.</string>
+    <string name="battery_allow">Exempt from battery optimization</string>
+    <string name="battery_unavailable">No battery-optimization screen on this ROM — adb command copied instead.</string>
     <string name="copied">Command copied</string>
 
     <string name="recover_title">Run recovery now?</string>

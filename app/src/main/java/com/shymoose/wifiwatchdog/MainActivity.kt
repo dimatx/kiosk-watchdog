@@ -66,6 +66,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
         binding.copyCommandButton.setOnClickListener { copyGrantCommand() }
+        binding.batteryButton.setOnClickListener { requestBatteryExemption() }
 
         requestLocationIfNeeded()
 
@@ -186,6 +187,9 @@ class MainActivity : AppCompatActivity() {
         val needsGrant = !recovery.hasSecureSettingsPermission()
         binding.permissionCard.visibility = if (needsGrant) View.VISIBLE else View.GONE
 
+        val dozed = !BatteryOptimization.isWhitelisted(this)
+        binding.batteryCard.visibility = if (dozed) View.VISIBLE else View.GONE
+
         // New events are prepended at position 0. RecyclerView keeps its scroll
         // anchor on the previous first item, which pushes fresh entries above the
         // viewport and makes the list look frozen. Re-pin to the top whenever the
@@ -241,9 +245,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun copyGrantCommand() {
         val cmd = "adb shell pm grant $packageName android.permission.WRITE_SECURE_SETTINGS"
-        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-            .setPrimaryClip(ClipData.newPlainText("adb", cmd))
+        copyToClipboard(cmd)
         Snackbar.make(binding.root, R.string.copied, Snackbar.LENGTH_SHORT).show()
+    }
+
+    /**
+     * The card stays visible until [refresh] observes the exemption, so no result callback is
+     * needed — the 2 s ticker picks it up as soon as the user comes back.
+     */
+    private fun requestBatteryExemption() {
+        if (BatteryOptimization.request(this)) return
+        copyToClipboard(BatteryOptimization.adbCommand(this))
+        Snackbar.make(binding.root, R.string.battery_unavailable, Snackbar.LENGTH_LONG).show()
+    }
+
+    private fun copyToClipboard(text: String) {
+        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+            .setPrimaryClip(ClipData.newPlainText("adb", text))
     }
 
     private fun requestLocationIfNeeded() {

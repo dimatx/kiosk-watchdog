@@ -10,6 +10,16 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!--
+        Lets the app ask to be exempted from Doze. Without the exemption Android
+        throttles setExactAndAllowWhileIdle to roughly one firing every 9-15
+        minutes while idle, which stretches both the check interval and the
+        heartbeat by the same amount.
+    -->
+    <uses-permission
+        android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        tools:ignore="BatteryLife" />
+
     <!-- Needed so SSID/BSSID/RSSI are not redacted on API 27+. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 

@@ -54,6 +54,15 @@ adb shell settings put secure voice_interaction_service \
 Open the app. The status card confirms both prerequisites are satisfied, and the
 watchdog starts immediately — and on every boot from then on.
 
+Tap **Exempt from battery optimization** on the third card if it appears. Doze
+otherwise throttles background alarms to roughly one every 15 minutes, stretching
+both the check interval and the heartbeat. If your ROM has no battery-optimization
+screen, the app copies this equivalent command to the clipboard instead:
+
+```bash
+adb shell dumpsys deviceidle whitelist +com.shymoose.wifiwatchdog
+```
+
 Want the assistant slot back? **Release assistant slot** in the overflow menu.
 
 ---
