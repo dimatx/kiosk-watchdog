@@ -39,10 +39,11 @@ which is normally impossible for an unprivileged app on Android 8.1.
 
 ## Quick start
 
+Grab the APK from [Releases](https://github.com/dimatx/wifi-watchdog/releases/latest),
+or build it yourself with `./gradlew assembleRelease`.
+
 ```bash
-# Build and install
-./gradlew assembleRelease
-adb install -r app/build/outputs/apk/release/app-release.apk
+adb install -r wifi-watchdog-v1.0.0.apk
 
 # Grant the two capabilities it needs (both survive reboots and reinstalls)
 adb shell pm grant com.shymoose.wifiwatchdog android.permission.WRITE_SECURE_SETTINGS
@@ -209,8 +210,8 @@ server, topic and credentials · heartbeat URL and interval.
 ./gradlew assembleRelease
 ```
 
-The APK lands in `app/build/outputs/apk/release/`. `minSdk` is 27. There are no
-prebuilt release artifacts — build it yourself.
+The APK lands in `app/build/outputs/apk/release/`. `minSdk` is 27. Prebuilt APKs are
+attached to each [release](https://github.com/dimatx/wifi-watchdog/releases).
 
 **No keystore required.** If one isn't configured, release builds fall back to the debug
 signing key, so a fresh clone builds out of the box. To sign properly, set
