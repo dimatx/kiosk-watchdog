@@ -51,6 +51,9 @@ class MainActivity : AppCompatActivity() {
         binding.eventList.layoutManager = LinearLayoutManager(this)
         binding.eventList.adapter = adapter
 
+        binding.versionLabel.text =
+            getString(R.string.version_footer, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+
         binding.enabledSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked == prefs.enabled) return@setOnCheckedChangeListener
             prefs.enabled = checked

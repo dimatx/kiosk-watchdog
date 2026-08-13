@@ -148,7 +148,8 @@ class Prefs(context: Context) {
 
         /** Empty on purpose: auto-follow the gateway unless the user pins a host. */
         const val DEFAULT_HOST = ""
-        const val DEFAULT_PORT = "80"
+        /** Matches [NetProbe.GATEWAY_PORT] so a pinned host behaves like the gateway probe. */
+        const val DEFAULT_PORT = "53"
         const val DEFAULT_NTFY_URL = "https://ntfy.sh"
         const val DEFAULT_INTERVAL = 20
         const val DEFAULT_T_REASSOCIATE = 60

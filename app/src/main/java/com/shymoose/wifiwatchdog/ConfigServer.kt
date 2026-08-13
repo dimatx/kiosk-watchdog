@@ -199,6 +199,16 @@ object ConfigServer {
                 out.flush()
             }
 
+            path == "/favicon.svg" || path == "/favicon.ico" -> {
+                val bytes = FAVICON.toByteArray(Charsets.UTF_8).size
+                out.write(
+                    "HTTP/1.1 200 OK\r\nContent-Type: image/svg+xml; charset=utf-8\r\n" +
+                        "Content-Length: $bytes\r\nCache-Control: max-age=86400\r\nConnection: close\r\n\r\n"
+                )
+                out.write(FAVICON)
+                out.flush()
+            }
+
             path == "/" -> respond(out, page(context, query["m"]))
             else -> {
                 out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
@@ -520,7 +530,8 @@ object ConfigServer {
                 ),
                 Field(
                     Prefs.KEY_PROBE_PORT, "Probe port", Kind.NUMBER,
-                    "TCP port opened to test the link.", Prefs.DEFAULT_PORT
+                    "TCP fallback when ICMP fails. Only used with a pinned host.",
+                    Prefs.DEFAULT_PORT
                 ),
                 Field(
                     Prefs.KEY_INTERVAL, "Check interval (s)", Kind.NUMBER,
@@ -600,6 +611,7 @@ object ConfigServer {
         val sb = StringBuilder(8192)
         sb.append("<!doctype html><html><head><meta charset=\"utf-8\">")
         sb.append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
+        sb.append("<link rel=\"icon\" type=\"image/svg+xml\" href=\"/favicon.svg\">")
         sb.append("<title>Wi-Fi Watchdog — ").append(esc(identity.hostname)).append("</title>")
         sb.append("<style>").append(CSS).append("</style></head><body><main>")
 
@@ -738,6 +750,18 @@ object ConfigServer {
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace("\"", "&quot;")
+
+    /** Wi-Fi arcs on a rounded blue tile. Served at /favicon.svg and /favicon.ico. */
+    private val FAVICON = """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+          <rect width="32" height="32" rx="7" fill="#2f81f7"/>
+          <g fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round">
+            <path d="M7.5 14.2a12 12 0 0 1 17 0"/>
+            <path d="M11.4 18.4a6.5 6.5 0 0 1 9.2 0"/>
+          </g>
+          <circle cx="16" cy="23.6" r="2.2" fill="#ffffff"/>
+        </svg>
+    """.trimIndent()
 
     private val CSS = """
         :root{color-scheme:dark light}

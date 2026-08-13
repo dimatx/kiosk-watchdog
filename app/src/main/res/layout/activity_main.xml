@@ -270,6 +270,16 @@
                 android:text="@string/no_events"
                 android:textAppearance="?attr/textAppearanceBodyMedium" />
         </FrameLayout>
+
+        <TextView
+            android:id="@+id/version_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="?android:attr/textColorSecondary"
+            tools:text="Wi-Fi Watchdog 1.2.0 (4)" />
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
 </LinearLayout>
