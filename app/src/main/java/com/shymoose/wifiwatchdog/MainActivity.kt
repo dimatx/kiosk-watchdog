@@ -12,6 +12,7 @@ import android.os.Looper
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -67,6 +68,10 @@ class MainActivity : AppCompatActivity() {
         }
         binding.copyCommandButton.setOnClickListener { copyGrantCommand() }
         binding.batteryButton.setOnClickListener { requestBatteryExemption() }
+        binding.configButton.setOnClickListener {
+            ConfigServer.start(this)
+            refresh()
+        }
 
         requestLocationIfNeeded()
 
@@ -77,6 +82,10 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         EventLog.addListener(logListener)
         handler.post(ticker)
+        // Opens a short LAN-only window so the wall-mounted display can be configured
+        // from a desktop browser. Bringing the app back to the front re-arms it, which
+        // is the only affordance the user has on a device with no real keyboard.
+        ConfigServer.start(this)
     }
 
     override fun onStop() {
@@ -117,6 +126,12 @@ class MainActivity : AppCompatActivity() {
 
         R.id.action_clear_log -> {
             EventLog.clear(this); refresh(); true
+        }
+
+        R.id.action_exit -> {
+            ConfigServer.stop()
+            Toast.makeText(this, R.string.exit_toast, Toast.LENGTH_SHORT).show()
+            finish(); true
         }
 
         else -> super.onOptionsItemSelected(item)
@@ -190,19 +205,30 @@ class MainActivity : AppCompatActivity() {
         val dozed = !BatteryOptimization.isWhitelisted(this)
         binding.batteryCard.visibility = if (dozed) View.VISIBLE else View.GONE
 
-        // New events are prepended at position 0. RecyclerView keeps its scroll
-        // anchor on the previous first item, which pushes fresh entries above the
-        // viewport and makes the list look frozen. Re-pin to the top whenever the
-        // user was already there.
-        val layout = binding.eventList.layoutManager as? LinearLayoutManager
-        val wasAtTop = (layout?.findFirstCompletelyVisibleItemPosition() ?: 0) <= 0
-        val before = adapter.itemCount
+        refreshConfigCard()
+
+        // The list renders inside the page-wide NestedScrollView with its own
+        // nested scrolling disabled, so it has no independent scroll anchor to
+        // maintain — new events simply appear at the top of the rendered list.
         adapter.submit(EventLog.read(this))
-        if (wasAtTop && adapter.itemCount != before) {
-            binding.eventList.scrollToPosition(0)
-        }
         binding.emptyLabel.visibility =
             if (adapter.itemCount == 0) View.VISIBLE else View.GONE
+    }
+
+    private fun refreshConfigCard() {
+        val url = ConfigServer.url(this)
+        if (ConfigServer.isRunning && url != null) {
+            binding.configAddress.text = url
+            binding.configStatus.text = getString(
+                R.string.config_closing,
+                WatchdogService.formatDuration(ConfigServer.secondsRemaining())
+            )
+            binding.configButton.setText(R.string.config_extend)
+        } else {
+            binding.configAddress.text = getString(R.string.config_hint)
+            binding.configStatus.text = getString(R.string.config_stopped)
+            binding.configButton.setText(R.string.config_open)
+        }
     }
 
     private fun confirmManualRecovery() {

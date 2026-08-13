@@ -32,6 +32,9 @@ which is normally impossible for an unprivileged app on Android 8.1.
 - 📮 **Push alerts that survive the outage.** Notifications are queued while the link is
   down and flushed on recovery, with their original timestamps intact.
 - 💓 **Heartbeat webhook** for Uptime Kuma or anything else that accepts a `GET`.
+- 🖥️ **Configure it from your desktop browser.** A tabbed setup page runs on the device
+  for five minutes after you open the app — no on-screen keyboard required.
+  [More ↓](#browser-setup-page)
 - 🪶 **Tiny.** One foreground service, one alarm, an on-device event log. No analytics,
   no network calls you didn't configure.
 
@@ -64,6 +67,41 @@ adb shell dumpsys deviceidle whitelist +com.shymoose.wifiwatchdog
 ```
 
 Want the assistant slot back? **Release assistant slot** in the overflow menu.
+
+---
+
+## Browser setup page
+
+Wall displays rarely have a keyboard, and typing a ntfy topic or a webhook URL on a
+touch panel is miserable. So the app serves its own settings page.
+
+Every time you open the app it starts a small HTTP server and shows the address on the
+main screen:
+
+```
+http://192.168.1.42:8080
+```
+
+Open that in any browser on the same network and you get the full settings form, laid
+out across five tabs — **General**, **Probe**, **Recovery**, **Reporting** and
+**Tools** — so nothing is more than one click away.
+
+- **Autosave.** Leave a field after changing it and it saves immediately, with an
+  inline confirmation. No Save button to hunt for. (With JavaScript disabled the form
+  falls back to a plain Save button and still works.)
+- **Tools tab** fires a test notification, a test heartbeat, or a manual airplane-mode
+  cycle.
+- **Restarts are debounced**, so tabbing through several fields reschedules the
+  watchdog once, not once per keystroke.
+
+**The server shuts itself down five minutes after you open the app**, and it only ever
+listens on your LAN. Re-open the app to get another five minutes. The ntfy password is
+never sent to the browser — it renders as a masked placeholder, and a separate
+checkbox clears it.
+
+> Treat it as a trusted-LAN convenience, not an admin panel: there is no
+> authentication, so anyone on the same network can change the settings during that
+> five-minute window.
 
 ---
 
@@ -210,6 +248,9 @@ transitions are logged, so a long outage can't flood the event log.
 Probe host (blank = follow the gateway) and port · check interval · the four escalation
 thresholds · airplane dwell time · whether the airplane rung is allowed at all · ntfy
 server, topic and credentials · heartbeat URL and interval.
+
+Editable either on-device (overflow → **Settings**) or from your desktop via the
+[browser setup page](#browser-setup-page).
 
 ---
 
