@@ -9,23 +9,6 @@ class Prefs(context: Context) {
 
     private val sp: SharedPreferences = PreferenceManager.getDefaultSharedPreferences(context)
 
-    init {
-        // Older builds shipped a hard-coded probe host and the settings screen persisted it,
-        // so clear that value once to hand the probe back to gateway auto-detection.
-        if (!sp.getBoolean(KEY_GATEWAY_MIGRATED, false)) {
-            val editor = sp.edit().putBoolean(KEY_GATEWAY_MIGRATED, true)
-            if (sp.getString(KEY_PROBE_HOST, "")?.trim() == LEGACY_HOST) {
-                editor.putString(KEY_PROBE_HOST, "")
-            }
-            editor.apply()
-        }
-        // Reporting moved from a Home Assistant webhook to ntfy; drop the dead value
-        // so it stops occupying the preference store on upgraded installs.
-        if (sp.contains(KEY_LEGACY_WEBHOOK)) {
-            sp.edit().remove(KEY_LEGACY_WEBHOOK).apply()
-        }
-    }
-
     var enabled: Boolean
         get() = sp.getBoolean(KEY_ENABLED, true)
         set(value) = sp.edit().putBoolean(KEY_ENABLED, value).apply()
@@ -117,6 +100,21 @@ class Prefs(context: Context) {
         get() = sp.getLong(KEY_LAST_GOOD, 0L)
         set(value) = sp.edit().putLong(KEY_LAST_GOOD, value).apply()
 
+    /** Full URL hit on a cadence while the link is healthy. Blank disables it. */
+    val heartbeatUrl: String
+        get() = sp.getString(KEY_HEARTBEAT_URL, "")!!.trim()
+
+    val heartbeatIntervalSec: Int
+        get() = intPref(KEY_HEARTBEAT_INTERVAL, DEFAULT_HEARTBEAT_INTERVAL, 30, 86400)
+
+    val heartbeatConfigured: Boolean
+        get() = heartbeatUrl.startsWith("http", ignoreCase = true)
+
+    /** Persisted so restarts do not reset the cadence and double up on pings. */
+    var heartbeatLastAt: Long
+        get() = sp.getLong(KEY_HEARTBEAT_LAST, 0L)
+        set(value) = sp.edit().putLong(KEY_HEARTBEAT_LAST, value).apply()
+
     private fun intPref(key: String, def: Int, min: Int, max: Int): Int =
         (sp.getString(key, def.toString())?.toIntOrNull() ?: def).coerceIn(min, max)
 
@@ -137,21 +135,20 @@ class Prefs(context: Context) {
         const val KEY_NTFY_USER = "ntfy_user"
         const val KEY_NTFY_PASSWORD = "ntfy_password"
         const val KEY_NTFY_TEST = "ntfy_test"
-        private const val KEY_LEGACY_WEBHOOK = "webhook_url"
+        const val KEY_HEARTBEAT_URL = "heartbeat_url"
+        const val KEY_HEARTBEAT_INTERVAL = "heartbeat_interval_sec"
+        const val KEY_HEARTBEAT_TEST = "heartbeat_test"
+        private const val KEY_HEARTBEAT_LAST = "heartbeat_last_at"
         private const val KEY_LAST_GOOD = "last_good_at"
         private const val KEY_AIRPLANE_PENDING = "airplane_pending"
         private const val KEY_PREV_ASSISTANT = "previous_assistant"
         private const val KEY_LAST_GATEWAY = "last_gateway"
         private const val KEY_LAST_IP = "last_ip"
         private const val KEY_LAST_MAC = "last_mac"
-        private const val KEY_GATEWAY_MIGRATED = "gateway_probe_migrated"
-
-        /** Probe host baked into builds before gateway auto-detection existed. */
-        private const val LEGACY_HOST = "192.168.27.40"
 
         /** Empty on purpose: auto-follow the gateway unless the user pins a host. */
         const val DEFAULT_HOST = ""
-        const val DEFAULT_PORT = "8123"
+        const val DEFAULT_PORT = "80"
         const val DEFAULT_NTFY_URL = "https://ntfy.sh"
         const val DEFAULT_INTERVAL = 20
         const val DEFAULT_T_REASSOCIATE = 60
@@ -159,5 +156,6 @@ class Prefs(context: Context) {
         const val DEFAULT_T_HARD = 240
         const val DEFAULT_T_AIRPLANE = 360
         const val DEFAULT_AIRPLANE_DWELL = 15
+        const val DEFAULT_HEARTBEAT_INTERVAL = 300
     }
 }

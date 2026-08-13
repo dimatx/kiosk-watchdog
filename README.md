@@ -80,8 +80,11 @@ has **Release assistant slot** to hand the slot back.
 ./gradlew assembleRelease
 ```
 
-The APK lands in `app/build/outputs/apk/release/`. Release builds are signed when
-`release.jks` and the matching credentials are present; otherwise use `assembleDebug`.
+The APK lands in `app/build/outputs/apk/release/`. No keystore is required: if one is
+not configured, release builds fall back to the debug signing key so a fresh clone
+builds out of the box. To sign properly, set `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`,
+`KEY_ALIAS` and `KEY_PASSWORD` — either as environment variables (for CI) or in an
+untracked `keystore.properties` at the repo root.
 
 `targetSdk` is pinned to **28 on purpose**. `WifiManager.setWifiEnabled()` silently
 returns `false` for apps targeting API 29+, which would break every recovery rung.
@@ -90,8 +93,8 @@ The `ExpiredTargetSdkVersion` lint error is expected and suppressed at build tim
 ## Settings
 
 Probe host (blank = follow the gateway) and port, check interval, escalation
-thresholds, airplane dwell time, whether the airplane rung is allowed at all, and the
-ntfy notification settings.
+thresholds, airplane dwell time, whether the airplane rung is allowed at all, the ntfy
+notification settings and the heartbeat webhook.
 
 ## Notifications (ntfy)
 
@@ -103,12 +106,12 @@ sent as a bearer token, so an ntfy access token works in the password field alon
 Every notification body carries the event time plus the device's hostname, IP and MAC:
 
 ```
-Wi-Fi restored — starfire
-starfire · 192.168.27.227 · 94:08:53:2a:fb:75
-Occurred: Aug 12 18:23:17
+Wi-Fi restored — living-room-tablet
+living-room-tablet · 10.0.0.42 · a1:b2:c3:d4:e5:f6
+Occurred: Aug 12, 6:23 PM EDT
 Down for: 2m 23s
 Stage: 3
-Probe target: 192.168.27.1 (last known gateway)
+Probe target: 10.0.0.1 (last known gateway)
 ```
 
 Because every event except recovery happens **while the link is down**, messages are
@@ -124,9 +127,39 @@ is marked `(last known)`.
 **Send test notification** in Settings publishes immediately and records the outcome in
 the event log.
 
+### Device name
+
+The hostname in each message comes from `Settings.Global.device_name`. Android 8.1 has
+no UI for it, so set it over adb — it takes effect immediately, no restart:
+
+```bash
+adb shell settings put global device_name 'living-room-tablet'
+```
+
+## Heartbeat webhook
+
+Optional and independent of ntfy. While the link is healthy the app sends a plain `GET`
+to a URL of your choice every *n* seconds (default 300). It is a heartbeat, not an event
+hook: during an outage the app deliberately sends **nothing**, and that silence is what
+makes a push monitor raise the alarm.
+
+It was built against an [Uptime Kuma](https://uptime.kuma.pet/) push monitor, whose URL
+looks like `https://kuma.example.com/api/push/<token>?status=up&msg=OK&ping=`, but the
+URL is treated as opaque, so anything that accepts a GET works.
+
+Four placeholders are substituted if present: `{ping}` (last probe round-trip in ms,
+unencoded so it can be appended to Kuma's `ping=`), `{device}`, `{ip}` and `{mac}`.
+
+Nothing is queued or retried — a missed heartbeat is meant to be missed. Only
+transitions are logged, so a long outage cannot flood the event log.
+
 ## Safety
 
 Airplane mode is the one action that can strand the device. Before enabling it the app
 commits an `airplanePending` flag and arms an `AlarmManager` failsafe at `dwell + 30s`.
 If the process is killed mid-cycle, both the boot receiver and the service's
 `onStartCommand` see the pending flag and force airplane mode back off.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).

@@ -25,7 +25,7 @@ object DeviceIdentity {
         /** True when ip/mac came from the cache rather than the live interface. */
         val stale: Boolean
     ) {
-        /** Single line for a notification header, e.g. "starfire · 192.168.27.227 · 94:08:…". */
+        /** Single line for a notification header, e.g. "tablet · 10.0.0.42 · a1:b2:c3:…". */
         fun oneLine(): String {
             val parts = mutableListOf(hostname)
             ip?.let { parts.add(it) }

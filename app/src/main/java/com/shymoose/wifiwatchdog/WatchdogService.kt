@@ -63,6 +63,8 @@ class WatchdogService : Service() {
 
             ACTION_SEND_TEST -> runOnWorker(coalesce = false) { sendTestNotification() }
 
+            ACTION_SEND_HEARTBEAT -> runOnWorker(coalesce = false) { sendTestHeartbeat() }
+
             else -> {
                 if (State.startedAt == 0L) {
                     State.startedAt = System.currentTimeMillis()
@@ -129,7 +131,9 @@ class WatchdogService : Service() {
         if (prefs.lastGoodAtMillis == 0L) prefs.lastGoodAtMillis = now
 
         val target = probe.resolveTarget(prefs)
+        val probeStartedAt = SystemClock.elapsedRealtime()
         val reachable = target != null && probe.canReach(target)
+        val rttMs = SystemClock.elapsedRealtime() - probeStartedAt
         State.lastCheckAt = now
         State.wifi = probe.status()
         State.online = reachable
@@ -144,6 +148,9 @@ class WatchdogService : Service() {
             }
             // The link is up: this is the only moment queued notifications can go out.
             Ntfy.flush(this)
+            // Heartbeats are deliberately never queued — silence is what makes the
+            // monitor on the other end raise the alarm.
+            Heartbeat.maybePing(this, prefs, rttMs)
             prefs.lastGoodAtMillis = now
             State.consecutiveFailures = 0
             State.stage = 0
@@ -302,6 +309,15 @@ class WatchdogService : Service() {
         Ntfy.flush(this, force = true)
     }
 
+    private fun sendTestHeartbeat() {
+        if (!prefs.heartbeatConfigured) {
+            EventLog.add(this, EventLevel.ERROR, getString(R.string.log_heartbeat_unconfigured))
+            return
+        }
+        EventLog.add(this, EventLevel.ACTION, getString(R.string.log_heartbeat_test))
+        Heartbeat.pingNow(this, prefs, 0)
+    }
+
     // ------------------------------------------------------------- scheduling
 
     private fun scheduleNext() {
@@ -390,6 +406,7 @@ class WatchdogService : Service() {
         const val ACTION_FORCE_HARD_RESET = "com.shymoose.wifiwatchdog.FORCE_HARD_RESET"
         const val ACTION_FORCE_AIRPLANE = "com.shymoose.wifiwatchdog.FORCE_AIRPLANE"
         const val ACTION_SEND_TEST = "com.shymoose.wifiwatchdog.SEND_TEST"
+        const val ACTION_SEND_HEARTBEAT = "com.shymoose.wifiwatchdog.SEND_HEARTBEAT"
 
         private const val CHANNEL_ID = "watchdog"
         private const val NOTIFICATION_ID = 1001
@@ -452,7 +469,7 @@ class WatchdogService : Service() {
             else -> "${seconds / 3600}h ${(seconds % 3600) / 60}m"
         }
 
-        /** Human label for a probe target, e.g. "192.168.27.1 (gateway)". */
+        /** Human label for a probe target, e.g. "10.0.0.1 (gateway)". */
         fun describeTarget(context: Context, target: ProbeTarget?): String {
             if (target == null) return context.getString(R.string.probe_target_none)
             val source = context.getString(

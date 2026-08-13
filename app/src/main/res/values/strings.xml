@@ -107,4 +107,18 @@
     <string name="log_ntfy_test">Test notification queued</string>
     <string name="log_ntfy_unconfigured">Set an ntfy topic first</string>
     <string name="toast_ntfy_test">Test queued — check the event log</string>
+
+    <string name="cat_heartbeat">Heartbeat webhook</string>
+    <string name="pref_heartbeat_url">URL</string>
+    <string name="pref_heartbeat_url_summary">Optional. Hit with a GET while the link is healthy — for an Uptime Kuma push monitor or anything else.</string>
+    <string name="pref_heartbeat_interval">Interval (seconds)</string>
+    <string name="pref_heartbeat_interval_summary">How often to ping while online. Nothing is sent during an outage, which is what makes the monitor alert.</string>
+    <string name="pref_heartbeat_test">Send test heartbeat</string>
+    <string name="pref_heartbeat_test_summary">Pings the URL now and logs the result. Placeholders in the URL: {ping} {device} {ip} {mac}</string>
+    <string name="log_heartbeat_test">Test heartbeat sent</string>
+    <string name="log_heartbeat_test_ok">Test heartbeat accepted</string>
+    <string name="log_heartbeat_ok">Heartbeat recovered</string>
+    <string name="log_heartbeat_failed">Heartbeat failed</string>
+    <string name="log_heartbeat_unconfigured">Set a heartbeat URL first</string>
+    <string name="toast_heartbeat_test">Heartbeat sent — check the event log</string>
 </resources>
