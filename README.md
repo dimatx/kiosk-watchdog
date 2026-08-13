@@ -213,11 +213,14 @@ server, topic and credentials · heartbeat URL and interval.
 The APK lands in `app/build/outputs/apk/release/`. `minSdk` is 27. Prebuilt APKs are
 attached to each [release](https://github.com/dimatx/wifi-watchdog/releases).
 
-**No keystore required.** If one isn't configured, release builds fall back to the debug
-signing key, so a fresh clone builds out of the box. To sign properly, set
+**No keystore required to build.** If one isn't configured, release builds fall back to
+the debug signing key so a fresh clone builds out of the box. To sign properly, set
 `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD` — either as
-environment variables (for CI) or in an untracked `keystore.properties` at the repo
-root.
+environment variables or in an untracked `keystore.properties` at the repo root.
+
+Published releases are always signed with the project's own key. Pushing a `v*` tag
+triggers a workflow that builds, verifies the APK isn't debug-signed, and attaches it to
+the release automatically.
 
 > ⚠️ **`targetSdk` is pinned to 28 on purpose.** `WifiManager.setWifiEnabled()` silently
 > returns `false` for apps targeting API 29+, which would break every rung of the
