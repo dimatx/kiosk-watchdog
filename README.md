@@ -43,7 +43,7 @@ Grab the APK from [Releases](https://github.com/dimatx/wifi-watchdog/releases/la
 or build it yourself with `./gradlew assembleRelease`.
 
 ```bash
-adb install -r wifi-watchdog-v1.0.0.apk
+adb install -r wifi-watchdog-v1.0.1.apk
 
 # Grant the two capabilities it needs (both survive reboots and reinstalls)
 adb shell pm grant com.shymoose.wifiwatchdog android.permission.WRITE_SECURE_SETTINGS
