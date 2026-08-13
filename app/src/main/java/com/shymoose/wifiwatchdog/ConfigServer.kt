@@ -594,7 +594,8 @@ object ConfigServer {
                 ),
                 Field(
                     Prefs.KEY_HEARTBEAT_INTERVAL, "Interval (s)", Kind.NUMBER,
-                    "30–86400.", Prefs.DEFAULT_HEARTBEAT_INTERVAL.toString()
+                    "30–86400. Keep it well under the monitor's own interval.",
+                    Prefs.DEFAULT_HEARTBEAT_INTERVAL.toString()
                 )
             )
         )

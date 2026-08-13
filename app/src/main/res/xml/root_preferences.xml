@@ -86,7 +86,7 @@
             app:summary="@string/pref_heartbeat_url_summary"
             app:title="@string/pref_heartbeat_url" />
         <EditTextPreference
-            app:defaultValue="300"
+            app:defaultValue="120"
             app:key="heartbeat_interval_sec"
             app:summary="@string/pref_heartbeat_interval_summary"
             app:title="@string/pref_heartbeat_interval" />

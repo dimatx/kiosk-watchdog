@@ -157,6 +157,12 @@ class Prefs(context: Context) {
         const val DEFAULT_T_HARD = 240
         const val DEFAULT_T_AIRPLANE = 360
         const val DEFAULT_AIRPLANE_DWELL = 15
-        const val DEFAULT_HEARTBEAT_INTERVAL = 300
+        /**
+         * Deliberately half of the 300s that an Uptime Kuma push monitor
+         * defaults to. A push monitor fails the moment one ping is late, so the
+         * sender has to run at a multiple of the monitor's rate to leave slack
+         * for a dropped request.
+         */
+        const val DEFAULT_HEARTBEAT_INTERVAL = 120
     }
 }

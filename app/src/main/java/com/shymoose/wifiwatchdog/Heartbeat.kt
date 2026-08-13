@@ -28,26 +28,47 @@ object Heartbeat {
      * Fires if the configured interval has elapsed since the last successful
      * ping. Safe to call on every tick.
      *
+     * The next deadline is anchored to the *scheduled* time rather than to the
+     * moment the request completed. The service only ticks every
+     * [Prefs.checkIntervalSec] seconds and the request itself takes a while, so
+     * measuring from the send would push every period past its nominal length
+     * and let the error accumulate. A monitor configured to expect a ping every
+     * N seconds then misses roughly every other window.
+     *
      * @param rttMs round-trip time of the probe that proved the link is up.
      */
     fun maybePing(context: Context, prefs: Prefs, rttMs: Long) {
         if (!prefs.heartbeatConfigured) return
         val now = System.currentTimeMillis()
-        val due = prefs.heartbeatLastAt + prefs.heartbeatIntervalSec * 1000L
-        if (prefs.heartbeatLastAt != 0L && now < due) return
-        send(context, prefs, rttMs, manual = false)
+        val periodMs = prefs.heartbeatIntervalSec * 1000L
+        val last = prefs.heartbeatLastAt
+        val due = last + periodMs
+        if (last != 0L && now < due) return
+
+        // Only keep the old cadence when we are at most one period late. A
+        // longer gap means an outage, a clock change or a settings change, and
+        // the schedule should restart from now instead of firing a burst to
+        // catch up.
+        val anchor = if (last != 0L && now - due < periodMs) due else now
+        send(context, prefs, rttMs, manual = false, stampAt = anchor)
     }
 
     /** Ignores the schedule. Used by the settings screen to prove the URL works. */
     fun pingNow(context: Context, prefs: Prefs, rttMs: Long): Boolean =
-        send(context, prefs, rttMs, manual = true)
+        send(context, prefs, rttMs, manual = true, stampAt = System.currentTimeMillis())
 
-    private fun send(context: Context, prefs: Prefs, rttMs: Long, manual: Boolean): Boolean {
+    private fun send(
+        context: Context,
+        prefs: Prefs,
+        rttMs: Long,
+        manual: Boolean,
+        stampAt: Long,
+    ): Boolean {
         val url = expand(context, prefs.heartbeatUrl, rttMs)
         val ok = runCatching { get(url) }.getOrDefault(false)
 
         if (ok) {
-            prefs.heartbeatLastAt = System.currentTimeMillis()
+            prefs.heartbeatLastAt = stampAt
             if (manual) {
                 EventLog.add(context, EventLevel.INFO, context.getString(R.string.log_heartbeat_test_ok))
             } else if (failing) {
