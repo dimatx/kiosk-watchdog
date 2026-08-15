@@ -10,7 +10,7 @@ It probes the network continuously, and when the link dies it escalates through
 progressively stronger recovery actions — ending in a **genuine airplane-mode cycle**,
 which is normally impossible for an unprivileged app on Android 8.1.
 
-[![Build](https://github.com/dimatx/wifi-watchdog/actions/workflows/build.yml/badge.svg)](https://github.com/dimatx/wifi-watchdog/actions/workflows/build.yml)
+[![Build](https://github.com/dimatx/kiosk-watchdog/actions/workflows/build.yml/badge.svg)](https://github.com/dimatx/kiosk-watchdog/actions/workflows/build.yml)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 ![Android 8.1+](https://img.shields.io/badge/Android-8.1%2B-3ddc84)
 
@@ -47,11 +47,11 @@ which is normally impossible for an unprivileged app on Android 8.1.
 
 ## Quick start
 
-Grab the APK from [Releases](https://github.com/dimatx/wifi-watchdog/releases/latest),
+Grab the APK from [Releases](https://github.com/dimatx/kiosk-watchdog/releases/latest),
 or build it yourself with `./gradlew assembleRelease`.
 
 ```bash
-adb install -r wifi-watchdog-v1.0.1.apk
+adb install -r kiosk-watchdog-v1.3.1.apk
 
 # Grant the two capabilities it needs (both survive reboots and reinstalls)
 adb shell pm grant com.shymoose.wifiwatchdog android.permission.WRITE_SECURE_SETTINGS
@@ -392,7 +392,7 @@ Editable either on-device (overflow → **Settings**) or from your desktop via t
 ```
 
 The APK lands in `app/build/outputs/apk/release/`. `minSdk` is 27. Prebuilt APKs are
-attached to each [release](https://github.com/dimatx/wifi-watchdog/releases).
+attached to each [release](https://github.com/dimatx/kiosk-watchdog/releases).
 
 **No keystore required to build.** If one isn't configured, release builds fall back to
 the debug signing key so a fresh clone builds out of the box. To sign properly, set

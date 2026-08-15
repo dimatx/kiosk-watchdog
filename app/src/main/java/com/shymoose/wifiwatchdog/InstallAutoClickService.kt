@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
@@ -83,7 +84,7 @@ class InstallAutoClickService : AccessibilityService() {
                 if (!Prefs(this).autoInstallEnabled) return@postDelayed
                 val root = rootInActiveWindow ?: return@postDelayed
                 try {
-                    if (root.packageName?.toString() in INSTALLER_PACKAGES) handle(root)
+                if (root.packageName?.toString()?.let { isInstaller(this, it) } == true) handle(root)
                 } catch (t: Throwable) {
                     EventLog.add(this, EventLevel.ERROR, "Install auto-click sweep failed: ${t.message}")
                 } finally {
@@ -105,7 +106,7 @@ class InstallAutoClickService : AccessibilityService() {
         if (!Prefs(this).autoInstallEnabled) return
 
         val pkg = event.packageName?.toString() ?: return
-        if (pkg !in INSTALLER_PACKAGES) return
+        if (!isInstaller(this, pkg)) return
 
         if (SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) return
 
@@ -123,8 +124,12 @@ class InstallAutoClickService : AccessibilityService() {
         val texts = collectText(root)
 
         // Completion screen first: it has no allowlist-bearing prompt text, and
-        // reaching it means we already approved whatever is on it.
-        if (texts.any { it in COMPLETION_MARKERS }) {
+        // reaching it means we already approved whatever is on it. Recognised by
+        // its buttons as well as its wording, since the wording is localised and
+        // varies between ROMs while the view ids do not.
+        val finished = texts.any { it in COMPLETION_MARKERS } ||
+            findPreferred(root, emptyList(), doneIds) != null
+        if (finished) {
             if (clickFirst(root, doneLabels, doneIds)) {
                 EventLog.add(this, EventLevel.ACTION, "Dismissed install completion screen")
             }
@@ -285,6 +290,50 @@ class InstallAutoClickService : AccessibilityService() {
             "com.google.android.packageinstaller",
             "com.android.packageinstaller"
         )
+
+        @Volatile
+        private var resolvedInstallers: Set<String>? = null
+
+        /**
+         * Whether [pkg] is the package installer on *this* device.
+         *
+         * The two AOSP names are only a starting point. A ROM without Google
+         * Play Services has neither, and a vendor is free to ship its own — Fire
+         * OS being the case in point. Guessing wrong is the worst kind of
+         * failure here: every event is dropped, so nothing happens and nothing
+         * is logged.
+         *
+         * So the real handler of ACTION_INSTALL_PACKAGE is resolved from the
+         * package manager, with a name-shaped fallback for anything that calls
+         * itself a package installer. Resolved once and cached; the answer
+         * cannot change while the process lives.
+         */
+        fun isInstaller(context: Context, pkg: String): Boolean {
+            if (pkg in INSTALLER_PACKAGES) return true
+            if (pkg.endsWith("packageinstaller")) return true
+            return pkg in resolveInstallers(context)
+        }
+
+        private fun resolveInstallers(context: Context): Set<String> {
+            resolvedInstallers?.let { return it }
+            val found = runCatching {
+                val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).setDataAndType(
+                    Uri.parse("content://probe/probe.apk"),
+                    "application/vnd.android.package-archive"
+                )
+                context.packageManager.queryIntentActivities(intent, 0)
+                    .mapNotNull { it.activityInfo?.packageName }
+                    .toSet()
+            }.getOrElse { emptySet() }
+
+            val all = INSTALLER_PACKAGES + found
+            resolvedInstallers = all
+            val extra = found - INSTALLER_PACKAGES
+            if (extra.isNotEmpty()) {
+                EventLog.add(context, EventLevel.INFO, "Package installer on this device: $extra")
+            }
+            return all
+        }
 
         /** Strings that only appear once the install has already run. */
         private val COMPLETION_MARKERS = setOf("App installed.", "App installed", "Installing…", "Installing...")

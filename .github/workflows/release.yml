@@ -55,12 +55,12 @@ jobs:
       - name: Stage APK
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          cp app/build/outputs/apk/release/app-release.apk "wifi-watchdog-$TAG.apk"
+          cp app/build/outputs/apk/release/app-release.apk "kiosk-watchdog-$TAG.apk"
 
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: wifi-watchdog-*.apk
+          files: kiosk-watchdog-*.apk
           generate_release_notes: true
 
       - name: Clean up keystore

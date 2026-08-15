@@ -430,7 +430,7 @@ object ConfigServer {
             .lowercase()
             .replace(Regex("[^a-z0-9._-]"), "-")
             .trim('-')
-        return "wifi-watchdog-" + name.ifEmpty { "config" } + ".json"
+        return "kiosk-watchdog-" + name.ifEmpty { "config" } + ".json"
     }
 
     /**
