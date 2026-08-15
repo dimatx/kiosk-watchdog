@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Process
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
@@ -350,6 +351,15 @@ open class InstallAutoClickService : AccessibilityService() {
         /** Time for the package change to reach the accessibility manager. */
         private const val STANDBY_SETTLE_MS = 1_500L
 
+        /**
+         * How long after process start to leave the framework alone.
+         *
+         * A package replace restarts this process and rebinds the service shortly
+         * after; interfering inside that window fights a bind that was going to
+         * succeed.
+         */
+        private const val BIND_GRACE_MS = 30_000L
+
         @Volatile
         private var nextRepairAt = 0L
 
@@ -447,6 +457,14 @@ open class InstallAutoClickService : AccessibilityService() {
             if (!isEnabled(context) && !prefs.autoInstallServiceEverOn) return
             if (!AirplaneMode.hasPermission(context)) return
 
+            // The framework rebinds on its own after a package replace, and a tick
+            // can land while that is still in flight. Rewriting the setting then
+            // tears down a service that was about to come up — and, when the
+            // standby is the working identity, swaps it out for the primary that
+            // is already known to be stuck.
+            val sinceStart = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()
+            if (sinceStart < BIND_GRACE_MS) return
+
             // The framework can decline to bind for reasons nothing here can fix,
             // and the watchdog ticks every few seconds. Without a floor between
             // attempts this turns into a permanent stream of identical events.
@@ -454,9 +472,16 @@ open class InstallAutoClickService : AccessibilityService() {
             if (now < nextRepairAt) return
             nextRepairAt = now + REPAIR_MIN_INTERVAL_MS
 
-            if (rewriteAndAwaitBind(context, component(context))) {
+            // Whichever identity the setting already names goes first: it is the
+            // one the framework last accepted, so it is the likeliest to work and
+            // the least disruptive to re-assert.
+            val first = if (isStandbyListed(context)) altComponent(context) else component(context)
+            val second = if (first == component(context)) altComponent(context) else component(context)
+
+            if (first == altComponent(context)) showStandby(context)
+            if (rewriteAndAwaitBind(context, first)) {
                 repairReported = false
-                hideStandby(context)
+                if (first == component(context)) hideStandby(context)
                 EventLog.add(
                     context,
                     EventLevel.ACTION,
@@ -466,35 +491,58 @@ open class InstallAutoClickService : AccessibilityService() {
             }
 
             // Replacing the app can leave the accessibility manager believing a
-            // bind for this component is still in flight. That record is keyed by
-            // component name and nothing clears it, so the component is skipped
-            // forever after — by this app and by the system's own Accessibility
-            // screen alike. Only a reboot clears it, which a wall display should
-            // not need because an app updated.
+            // bind for that component is still in flight. The record is keyed by
+            // component name and nothing clears it, so the name is skipped forever
+            // after — by this app and by the system's own Accessibility screen
+            // alike. Only a reboot clears it, which a wall display should not need
+            // because an app updated.
             //
-            // The standby identity is a different name, so the stale record does
-            // not apply to it. Behaviour is identical.
-            if (showStandby(context) && rewriteAndAwaitBind(context, altComponent(context))) {
+            // The other identity is a different name, so the record does not apply.
+            // Behaviour is identical.
+            if (second == altComponent(context) && !showStandby(context)) {
+                reportStuck(context)
+                return
+            }
+            if (rewriteAndAwaitBind(context, second)) {
                 repairReported = false
+                if (second == component(context)) hideStandby(context)
                 EventLog.add(
                     context,
                     EventLevel.ACTION,
-                    "Auto-install service was blocked by the system — started the standby copy"
+                    "Auto-install service was blocked by the system — switched identity"
                 )
                 return
             }
 
-            // Said once per outage. Repeating it every attempt would bury the
-            // events that actually describe what the watchdog is doing.
-            if (!repairReported) {
-                repairReported = true
-                EventLog.add(
-                    context,
-                    EventLevel.WARN,
-                    "Auto-install service will not start — turn it on under " +
-                        "Settings, Accessibility"
-                )
-            }
+            reportStuck(context)
+        }
+
+        /** Whether the enabled list currently names the standby identity. */
+        private fun isStandbyListed(context: Context): Boolean {
+            val alt = altComponent(context)
+            val names = setOf(alt.flattenToString(), alt.flattenToShortString())
+            return Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ).orEmpty().split(':').any { it in names }
+        }
+
+        /**
+         * Said once per outage. Repeating it every attempt would bury the events
+         * that actually describe what the watchdog is doing.
+         *
+         * Recommends a restart rather than the Accessibility screen: once both
+         * identities are being skipped, that screen cannot turn either back on
+         * either — it reports the service as enabled while nothing is bound.
+         */
+        private fun reportStuck(context: Context) {
+            if (repairReported) return
+            repairReported = true
+            EventLog.add(
+                context,
+                EventLevel.WARN,
+                "Auto-install service will not start — restart the device to clear it"
+            )
         }
 
         /**
