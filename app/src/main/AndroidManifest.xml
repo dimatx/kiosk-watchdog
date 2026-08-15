@@ -24,6 +24,14 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!--
+        Only used by the auto-confirm self-test, which hands the app's own APK
+        back to the package installer so the update dialog can be exercised on
+        demand instead of waiting for another app to ship an update. Normal
+        permission, granted at install time.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
         Not grantable from the UI. Grant once over adb:
           adb shell pm grant com.shymoose.wifiwatchdog android.permission.WRITE_SECURE_SETTINGS
         Without it the hard-reset rung (full driver unload) is unavailable; every
@@ -122,6 +130,39 @@
                 android:name="android.speech"
                 android:resource="@xml/recognition_service" />
         </service>
+
+        <!--
+            Confirms the package installer's update dialog. Android 8.1 has no
+            rootless silent install, so an app that ships its own updates
+            otherwise waits forever for someone to tap INSTALL on the wall.
+        -->
+        <service
+            android:name=".InstallAutoClickService"
+            android:exported="true"
+            android:label="@string/a11y_install_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/install_click_service" />
+        </service>
+
+        <!--
+            Hands the app's own APK to the package installer for the auto-confirm
+            self-test. A file:// URI would trip FileUriExposedException, so the
+            copy is served from the cache dir through a content:// URI instead.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

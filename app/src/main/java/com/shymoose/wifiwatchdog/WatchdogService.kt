@@ -130,6 +130,8 @@ class WatchdogService : Service() {
         val now = System.currentTimeMillis()
         if (prefs.lastGoodAtMillis == 0L) prefs.lastGoodAtMillis = now
 
+        InstallAutoClickService.repairIfUnbound(this)
+
         val target = probe.resolveTarget(prefs)
         val probeStartedAt = SystemClock.elapsedRealtime()
         val reachable = target != null && probe.canReach(target)
@@ -187,7 +189,7 @@ class WatchdogService : Service() {
             }
 
             2 -> if (downSec >= prefs.hardResetAfterSec) {
-                if (prefs.hardResetEnabled) recovery.hardReset() else recovery.softToggle()
+                if (hardResetUsable()) recovery.hardReset() else recovery.softToggle()
                 State.stage = 3
                 report("hard_reset", downSec)
             }
@@ -218,13 +220,21 @@ class WatchdogService : Service() {
 
     private fun airplaneUsable(): Boolean = prefs.airplaneEnabled && AirplaneMode.isAvailable(this)
 
+    /**
+     * Hard reset needs WRITE_SECURE_SETTINGS to unload the driver. On a device
+     * that was never set up over adb it can never work, so check here instead of
+     * letting [WifiRecovery.hardReset] warn about it on every single escalation.
+     */
+    private fun hardResetUsable(): Boolean =
+        prefs.hardResetEnabled && recovery.hasSecureSettingsPermission()
+
     private fun lastResortReset() {
-        if (prefs.hardResetEnabled) recovery.hardReset() else recovery.softToggle()
+        if (hardResetUsable()) recovery.hardReset() else recovery.softToggle()
     }
 
     private fun forceHardReset() {
         EventLog.add(this, EventLevel.ACTION, "Manual recovery triggered")
-        if (prefs.hardResetEnabled) recovery.hardReset() else recovery.softToggle()
+        if (hardResetUsable()) recovery.hardReset() else recovery.softToggle()
     }
 
     private fun forceAirplaneCycle() {

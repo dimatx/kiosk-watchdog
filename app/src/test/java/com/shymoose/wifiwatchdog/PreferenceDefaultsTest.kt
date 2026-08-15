@@ -42,7 +42,9 @@ class PreferenceDefaultsTest {
         Prefs.KEY_NTFY_URL to Prefs.DEFAULT_NTFY_URL,
         Prefs.KEY_HEARTBEAT_INTERVAL to Prefs.DEFAULT_HEARTBEAT_INTERVAL.toString(),
         Prefs.KEY_HARD_ENABLED to "true",
-        Prefs.KEY_AIRPLANE_ENABLED to "true"
+        Prefs.KEY_AIRPLANE_ENABLED to "true",
+        Prefs.KEY_AUTO_INSTALL_ENABLED to "true",
+        Prefs.KEY_AUTO_INSTALL_ALLOWLIST to Prefs.DEFAULT_AUTO_INSTALL_ALLOWLIST
     )
 
     @Test

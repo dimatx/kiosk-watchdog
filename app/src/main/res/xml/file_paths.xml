@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Only the self-test APK copy is ever shared. -->
+    <cache-path
+        name="selftest"
+        path="selftest/" />
+</paths>

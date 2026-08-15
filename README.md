@@ -1,10 +1,10 @@
-# Wi-Fi Watchdog
+# Kiosk Watchdog
 
-**Keeps an Android device on Wi-Fi — without root.**
+**Keeps an unattended Android kiosk display alive — without root.**
 
 Some devices drop off Wi-Fi and simply never come back. The radio looks up, the icon
 looks fine, and nothing on the device notices until a human walks over and toggles
-something. Wi-Fi Watchdog is the thing that walks over.
+something. Kiosk Watchdog is the thing that walks over.
 
 It probes the network continuously, and when the link dies it escalates through
 progressively stronger recovery actions — ending in a **genuine airplane-mode cycle**,
@@ -15,8 +15,8 @@ which is normally impossible for an unprivileged app on Android 8.1.
 ![Android 8.1+](https://img.shields.io/badge/Android-8.1%2B-3ddc84)
 
 > Built for a Lenovo ThinkSmart View (`starfire`) on LineageOS 15.1, but nothing in it
-> is device-specific. Any rootless Android 8.1+ device you can reach once over adb
-> will work.
+> is device-specific. Any rootless Android 8.1+ device works — adb access once is needed
+> for the Wi-Fi recovery ladder, but not for the update auto-confirm.
 
 ---
 
@@ -24,7 +24,12 @@ which is normally impossible for an unprivileged app on Android 8.1.
 
 - 🔁 **Four-rung recovery ladder** — from a polite `reassociate` all the way to a full
   driver unload and a real airplane-mode cycle.
-- 🔓 **No root required.** Two one-time adb commands and that's it.
+- 📦 **Auto-confirms app update dialogs.** A kiosk app that ships its own updates gets
+  stuck on the installer's "update to this existing application?" prompt forever.
+  Kiosk Watchdog taps INSTALL for the apps you allowlist, then dismisses the completion
+  screen. [More ↓](#auto-confirming-update-dialogs)
+- 🔓 **No root required.** Two one-time adb commands and that's it — or none at all if
+  you only want the update auto-confirm. [More ↓](#running-without-adb)
 - ✈️ **Real airplane mode from an unprivileged app** — via the assistant trick, the only
   path that actually works on Android 8.1. [How ↓](#why-airplane-mode-is-special)
 - 🎯 **Probes your gateway, not a server.** A remote service restarting can't trigger a
@@ -67,6 +72,100 @@ adb shell dumpsys deviceidle whitelist +com.shymoose.wifiwatchdog
 ```
 
 Want the assistant slot back? **Release assistant slot** in the overflow menu.
+
+---
+
+## Auto-confirming update dialogs
+
+A kiosk app that updates itself hits a wall on Android 8.1: there is no rootless silent
+install, so the package installer puts up *"Do you want to install an update to this
+existing application?"* and waits. On a display bolted to a wall, it waits forever.
+
+Kiosk Watchdog watches for that dialog and taps **INSTALL** — but only for apps you have
+allowlisted by name, and only on the package installer's own screens. When the install
+finishes it dismisses the completion screen, preferring **OPEN** over **DONE** so the app
+comes straight back up.
+
+Set it up under **App update auto-confirm** in settings:
+
+| Setting | What it does |
+| --- | --- |
+| **Confirm update dialogs** | Master switch for the feature. |
+| **Allowed apps** | Comma-separated app names, matched against the name the install dialog shows. Default: `Kiosk Satellite`. Anything not listed is left alone. |
+| **Enable accessibility service** | Turns the service on. Uses `WRITE_SECURE_SETTINGS` if it was granted; otherwise opens the system accessibility screen so you can toggle it by hand. |
+| **Run a self-test** | Offers the app its own APK back, which produces a genuine install dialog, then confirms it. Nothing actually changes — the APK is byte-identical to the installed one. |
+
+Matching is done on the accessibility node tree, not on screen coordinates, so it is
+unaffected by orientation, DPI, or ROM theming.
+
+### Two things that will block it
+
+Both are one-time, and both are per-device rather than per-app:
+
+- **"Install unknown apps"** must be allowed for whichever app does the installing.
+  Declaring `REQUEST_INSTALL_PACKAGES` only gets an app *listed* on that screen — the
+  switch still starts off. The self-test opens the screen for you; the app shipping the
+  updates needs its own grant.
+- **Play Protect** interposes its own dialog on sideloaded installs, from
+  `com.android.vending`. That package is deliberately not auto-clicked, so an unattended
+  install stops there indefinitely. On a kiosk display, turn the verifier off:
+
+  ```bash
+  adb shell settings put global package_verifier_enable 0
+  adb shell settings put global package_verifier_user_consent -1
+  ```
+
+  Expect Play Protect to flag this app itself, too — it declares
+  `WRITE_SECURE_SETTINGS` and auto-confirms install dialogs, which is exactly the
+  behaviour the classifier looks for. It warns rather than blocks. Devices without Google
+  Play Services, such as Fire tablets, never see any of this.
+
+If you have adb, the service can also be turned on directly:
+
+```bash
+adb shell settings put secure enabled_accessibility_services \
+  com.shymoose.wifiwatchdog/.InstallAutoClickService
+```
+
+> ⚠️ Do **not** quote that component name. A quoted value is accepted silently and then
+> does not persist — the same trap as the assistant slot above. Confirm with
+> `adb shell dumpsys accessibility | grep wifiwatchdog`.
+
+---
+
+## Running without adb
+
+Some kiosk devices — Amazon Fire tablets in particular — will not expose adb over TCP.
+Kiosk Watchdog installs and runs there anyway; it just loses the two recovery rungs that
+require `WRITE_SECURE_SETTINGS`.
+
+Everything below is requested from inside the app, with no adb at all:
+
+| Capability | How it's obtained |
+| --- | --- |
+| Location permission | Runtime prompt on first launch (needed to read the Wi-Fi state). |
+| Battery-optimization exemption | System prompt from the status card. |
+| Install packages | Granted at install time, then **"Allow from this source"** on the screen the self-test opens. |
+| **Accessibility service** | **Enable accessibility service** opens the system screen; toggle **Kiosk Watchdog install auto-confirm** on. |
+
+Once it has bound once, it stays on by itself: force-stopping the app tears the service
+down without rebinding it, and if it was the only accessibility service on the device
+Android empties the list entirely. The watchdog notices on its next check and turns it
+back on. Switch **Confirm update dialogs** off to stop that for good.
+
+`WRITE_SECURE_SETTINGS` is `signature|privileged|development` — there is no runtime
+prompt for it on any Android version, so without adb the **hard reset** and
+**airplane cycle** rungs are unavailable. The probe, `reassociate`, and soft Wi-Fi toggle
+still work, as does the whole update auto-confirm feature.
+
+The app notices this at startup and takes the impossible controls away rather than
+letting them look operable: the **Hard reset** and **Airplane** settings are greyed out
+with an explanation, the manual *Airplane cycle* and *Release assistant slot* menu items
+are hidden, and the escalation ladder silently substitutes a soft toggle instead of
+warning about the missing permission on every attempt.
+
+On a device that has no Wi-Fi trouble and is only there for the auto-confirm, turn the
+watchdog itself off from the status card and leave the accessibility service running.
 
 ---
 

@@ -114,6 +114,16 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        // Both of these are built on WRITE_SECURE_SETTINGS. Without it there is
+        // nothing the user could do on-device to make them work, so hide them
+        // rather than offer an action that can only fail.
+        val privileged = AirplaneMode.hasPermission(this)
+        menu.findItem(R.id.action_airplane_cycle)?.isVisible = privileged
+        menu.findItem(R.id.action_release_assistant)?.isVisible = privileged
+        return super.onPrepareOptionsMenu(menu)
+    }
+
     override fun onOptionsItemSelected(item: MenuItem): Boolean = when (item.itemId) {
         R.id.action_settings -> {
             startActivity(Intent(this, SettingsActivity::class.java)); true

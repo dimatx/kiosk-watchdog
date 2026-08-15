@@ -279,7 +279,7 @@
             android:gravity="center"
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="?android:attr/textColorSecondary"
-            tools:text="Wi-Fi Watchdog 1.2.0 (4)" />
+            tools:text="Kiosk Watchdog 1.3.0 (7)" />
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
 </LinearLayout>

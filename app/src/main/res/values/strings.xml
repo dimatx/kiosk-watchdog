@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Wi-Fi Watchdog</string>
+    <string name="app_name">Kiosk Watchdog</string>
     <string name="settings_title">Settings</string>
 
     <string name="channel_name">Watchdog status</string>
@@ -34,7 +34,7 @@
     <string name="open_settings">Settings</string>
     <string name="activity_header">Activity</string>
     <string name="no_events">Nothing logged yet.</string>
-    <string name="version_footer">Wi\u2011Fi Watchdog %1$s (%2$d)</string>
+    <string name="version_footer">Kiosk Watchdog %1$s (%2$d)</string>
 
     <string name="permission_title">Full recovery is disabled</string>
     <string name="permission_body">Grant WRITE_SECURE_SETTINGS over adb to allow a complete Wi-Fi driver reload. Without it the watchdog can only do a soft Wi-Fi toggle.</string>
@@ -96,6 +96,7 @@
     <string name="pref_t_airplane_summary">How long the link must stay down before the heaviest rung runs.</string>
     <string name="pref_airplane_dwell">Airplane dwell (seconds)</string>
     <string name="pref_airplane_dwell_summary">How long to stay in airplane mode before switching back.</string>
+    <string name="pref_needs_adb">Unavailable — needs WRITE_SECURE_SETTINGS, which can only be granted over adb.</string>
 
     <string name="cat_reporting">Notifications (ntfy)</string>
     <string name="pref_ntfy_url">Server URL</string>
@@ -136,4 +137,21 @@
     <string name="log_heartbeat_failed">Heartbeat failed</string>
     <string name="log_heartbeat_unconfigured">Set a heartbeat URL first</string>
     <string name="toast_heartbeat_test">Heartbeat sent — check the event log</string>
+
+    <string name="cat_auto_install">App update auto-confirm</string>
+    <string name="a11y_install_label">Kiosk Watchdog install auto-confirm</string>
+    <string name="a11y_install_description">Taps INSTALL on the system update dialog for allowlisted apps, so a display mounted on a wall can finish an app update without anyone walking over to it. Only the package installer\'s own screens are ever read.</string>
+    <string name="pref_auto_install_enabled">Confirm update dialogs</string>
+    <string name="pref_auto_install_enabled_summary">Taps INSTALL when an allowlisted app updates itself, then dismisses the completion screen with OPEN so the app comes back up. Also needs the accessibility service turned on below.</string>
+    <string name="pref_auto_install_allowlist">Allowed apps</string>
+    <string name="pref_auto_install_allowlist_summary">Comma-separated app names, matched against the name shown in the install dialog. Anything not listed is left alone.</string>
+    <string name="pref_auto_install_setup">Enable accessibility service</string>
+    <string name="pref_auto_install_setup_summary">Required for the taps to work. Turns itself on if the app was set up over adb; otherwise this opens the system accessibility screen so you can turn it on by hand.</string>
+    <string name="toast_auto_install_on">Accessibility service enabled</string>
+    <string name="toast_auto_install_already">Already enabled</string>
+    <string name="toast_auto_install_manual">Turn on \"Kiosk Watchdog install auto-confirm\" in this list</string>
+    <string name="toast_auto_install_failed">Could not enable — check the event log</string>
+    <string name="pref_auto_install_test">Run a self-test</string>
+    <string name="pref_auto_install_test_summary">Offers this app its own update so the install dialog appears, then confirms it automatically. Nothing is actually changed — the APK is identical to the one already installed.</string>
+    <string name="toast_auto_install_test">Self-test started — the dialog should confirm itself</string>
 </resources>

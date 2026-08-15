@@ -598,6 +598,20 @@ object ConfigServer {
                     Prefs.DEFAULT_HEARTBEAT_INTERVAL.toString()
                 )
             )
+        ),
+        Section(
+            "Recovery", "App update auto-confirm", listOf(
+                Field(
+                    Prefs.KEY_AUTO_INSTALL_ENABLED, "Confirm update dialogs", Kind.BOOL,
+                    "Taps INSTALL for allowlisted apps. Needs the accessibility service " +
+                        "enabled from the on-device settings screen."
+                ),
+                Field(
+                    Prefs.KEY_AUTO_INSTALL_ALLOWLIST, "Allowed apps", Kind.TEXT,
+                    "Comma-separated app names as shown in the install dialog.",
+                    Prefs.DEFAULT_AUTO_INSTALL_ALLOWLIST
+                )
+            )
         )
     )
 
@@ -613,10 +627,10 @@ object ConfigServer {
         sb.append("<!doctype html><html><head><meta charset=\"utf-8\">")
         sb.append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
         sb.append("<link rel=\"icon\" type=\"image/svg+xml\" href=\"/favicon.svg\">")
-        sb.append("<title>Wi-Fi Watchdog — ").append(esc(identity.hostname)).append("</title>")
+        sb.append("<title>Kiosk Watchdog — ").append(esc(identity.hostname)).append("</title>")
         sb.append("<style>").append(CSS).append("</style></head><body><main>")
 
-        sb.append("<h1>Wi-Fi Watchdog</h1>")
+        sb.append("<h1>Kiosk Watchdog</h1>")
         sb.append("<p class=\"sub\">").append(esc(identity.oneLine())).append("</p>")
 
         val online = state.online

@@ -66,6 +66,18 @@ class Prefs(context: Context) {
         get() = sp.getString(KEY_PREV_ASSISTANT, "")!!
         set(value) = sp.edit().putString(KEY_PREV_ASSISTANT, value).apply()
 
+    /**
+     * True once the install auto-click service has actually bound at least once.
+     *
+     * Android drops the whole accessibility list when the last enabled service's
+     * package is force-stopped or replaced, so "not currently listed" cannot be
+     * read as "the user switched it off". This remembers that it was genuinely
+     * running, which is what makes an automatic rebind safe.
+     */
+    var autoInstallServiceEverOn: Boolean
+        get() = sp.getBoolean(KEY_AUTO_INSTALL_EVER_ON, false)
+        set(value) = sp.edit().putBoolean(KEY_AUTO_INSTALL_EVER_ON, value).commit().let { }
+
     /** ntfy server root, e.g. https://ntfy.sh or a self-hosted instance. */
     val ntfyUrl: String
         get() = sp.getString(KEY_NTFY_URL, DEFAULT_NTFY_URL)!!.trim()
@@ -115,6 +127,22 @@ class Prefs(context: Context) {
         get() = sp.getLong(KEY_HEARTBEAT_LAST, 0L)
         set(value) = sp.edit().putLong(KEY_HEARTBEAT_LAST, value).apply()
 
+    /** Whether the accessibility service may confirm package-installer dialogs. */
+    val autoInstallEnabled: Boolean
+        get() = sp.getBoolean(KEY_AUTO_INSTALL_ENABLED, true)
+
+    /**
+     * Comma-separated app labels whose update dialogs may be confirmed.
+     *
+     * Matched against the label the installer renders, because the node tree
+     * exposes the human-readable name rather than the target package.
+     */
+    val autoInstallAllowlist: List<String>
+        get() = sp.getString(KEY_AUTO_INSTALL_ALLOWLIST, DEFAULT_AUTO_INSTALL_ALLOWLIST)!!
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
     private fun intPref(key: String, def: Int, min: Int, max: Int): Int =
         (sp.getString(key, def.toString())?.toIntOrNull() ?: def).coerceIn(min, max)
 
@@ -138,9 +166,14 @@ class Prefs(context: Context) {
         const val KEY_HEARTBEAT_URL = "heartbeat_url"
         const val KEY_HEARTBEAT_INTERVAL = "heartbeat_interval_sec"
         const val KEY_HEARTBEAT_TEST = "heartbeat_test"
+        const val KEY_AUTO_INSTALL_ENABLED = "auto_install_enabled"
+        const val KEY_AUTO_INSTALL_ALLOWLIST = "auto_install_allowlist"
+        const val KEY_AUTO_INSTALL_SETUP = "auto_install_setup"
+        const val KEY_AUTO_INSTALL_TEST = "auto_install_test"
         private const val KEY_HEARTBEAT_LAST = "heartbeat_last_at"
         private const val KEY_LAST_GOOD = "last_good_at"
         private const val KEY_AIRPLANE_PENDING = "airplane_pending"
+        private const val KEY_AUTO_INSTALL_EVER_ON = "auto_install_service_ever_on"
         private const val KEY_PREV_ASSISTANT = "previous_assistant"
         private const val KEY_LAST_GATEWAY = "last_gateway"
         private const val KEY_LAST_IP = "last_ip"
@@ -164,5 +197,8 @@ class Prefs(context: Context) {
          * for a dropped request.
          */
         const val DEFAULT_HEARTBEAT_INTERVAL = 120
+
+        /** The one app on these displays that self-updates and blocks on a tap. */
+        const val DEFAULT_AUTO_INSTALL_ALLOWLIST = "Kiosk Satellite"
     }
 }

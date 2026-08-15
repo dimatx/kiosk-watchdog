@@ -95,4 +95,26 @@
             app:summary="@string/pref_heartbeat_test_summary"
             app:title="@string/pref_heartbeat_test" />
     </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cat_auto_install">
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="auto_install_enabled"
+            app:summary="@string/pref_auto_install_enabled_summary"
+            app:title="@string/pref_auto_install_enabled" />
+        <EditTextPreference
+            app:defaultValue="Kiosk Satellite"
+            app:key="auto_install_allowlist"
+            app:summary="@string/pref_auto_install_allowlist_summary"
+            app:title="@string/pref_auto_install_allowlist" />
+        <Preference
+            app:key="auto_install_setup"
+            app:summary="@string/pref_auto_install_setup_summary"
+            app:title="@string/pref_auto_install_setup" />
+
+        <Preference
+            app:key="auto_install_test"
+            app:summary="@string/pref_auto_install_test_summary"
+            app:title="@string/pref_auto_install_test" />
+    </PreferenceCategory>
 </androidx.preference.PreferenceScreen>
