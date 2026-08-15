@@ -15,11 +15,11 @@ data class LogEvent(
     val level: EventLevel,
     val message: String
 ) {
-    fun formattedTime(): String = TIME_FORMAT.format(Date(timestamp))
-
-    companion object {
-        private val TIME_FORMAT = SimpleDateFormat("MMM d, HH:mm:ss", Locale.getDefault())
-    }
+    fun formattedTime(): String =
+        // Built per call rather than held in a static: a device that changes locale
+        // or time zone while running would otherwise keep formatting with the old one,
+        // and these displays stay up for months.
+        SimpleDateFormat("MMM d, HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
 }
 
 /**

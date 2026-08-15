@@ -96,7 +96,6 @@ object InstallSelfTest {
      * covers the self-test.
      */
     private fun requestUnknownSources(context: Context): String? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
         if (context.packageManager.canRequestPackageInstalls()) return null
 
         val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)

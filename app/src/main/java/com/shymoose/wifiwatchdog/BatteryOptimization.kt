@@ -21,7 +21,6 @@ object BatteryOptimization {
 
     /** True when Doze cannot throttle this app's alarms or network access. */
     fun isWhitelisted(context: Context): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
         return pm.isIgnoringBatteryOptimizations(context.packageName)
     }

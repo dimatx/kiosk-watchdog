@@ -230,11 +230,7 @@ object AirplaneMode {
     private fun armFailsafe(context: Context, delayMs: Long) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val at = SystemClock.elapsedRealtime() + delayMs
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, failsafeIntent(context))
-        } else {
-            am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, failsafeIntent(context))
-        }
+        am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, failsafeIntent(context))
     }
 
     private fun cancelFailsafe(context: Context) {

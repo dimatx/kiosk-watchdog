@@ -29,10 +29,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var probe: NetProbe
 
     private val handler = Handler(Looper.getMainLooper())
-    private val logListener: () -> Unit = { handler.post { refresh() } }
+    private val logListener: () -> Unit = { handler.post { refreshLog() } }
     private val ticker = object : Runnable {
         override fun run() {
-            refresh()
+            // Only the status card: it carries elapsed-time text that goes stale on
+            // its own. The event list is pushed by EventLog instead, because
+            // re-reading it here would re-parse the whole log twice a second.
+            refreshStatus()
             handler.postDelayed(this, 2_000)
         }
     }
@@ -84,6 +87,9 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         EventLog.addListener(logListener)
+        // Draw the log once here: from now on it is pushed by EventLog, and the
+        // ticker only keeps the status card's elapsed-time text current.
+        refresh()
         handler.post(ticker)
         // Opens a short LAN-only window so the wall-mounted display can be configured
         // from a desktop browser. Bringing the app back to the front re-arms it, which
@@ -105,6 +111,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         EventLog.addListener(logListener)
+        refresh()
         handler.removeCallbacks(ticker)
         handler.post(ticker)
     }
@@ -153,16 +160,17 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------- UI
 
     private fun refresh() {
+        refreshStatus()
+        refreshLog()
+    }
+
+    private fun refreshStatus() {
         val state = WatchdogService.State
         val enabled = prefs.enabled
 
-        binding.enabledSwitch.setOnCheckedChangeListener(null)
-        binding.enabledSwitch.isChecked = enabled
-        binding.enabledSwitch.setOnCheckedChangeListener { _, checked ->
-            prefs.enabled = checked
-            if (checked) WatchdogService.start(this) else WatchdogService.stop(this)
-            refresh()
-        }
+        // The listener set in onCreate ignores a value that already matches the
+        // pref, so this cannot loop back on itself.
+        if (binding.enabledSwitch.isChecked != enabled) binding.enabledSwitch.isChecked = enabled
 
         val online = state.online
         val statusText = when {
@@ -219,10 +227,16 @@ class MainActivity : AppCompatActivity() {
         binding.batteryCard.visibility = if (dozed) View.VISIBLE else View.GONE
 
         refreshConfigCard()
+    }
 
-        // The list renders inside the page-wide NestedScrollView with its own
-        // nested scrolling disabled, so it has no independent scroll anchor to
-        // maintain — new events simply appear at the top of the rendered list.
+    /**
+     * Re-renders the event list.
+     *
+     * Reading the log parses every stored event, so this runs only when something
+     * has actually been logged — [EventLog] pushes that through [logListener] —
+     * rather than on the status ticker.
+     */
+    private fun refreshLog() {
         adapter.submit(EventLog.read(this))
         binding.emptyLabel.visibility =
             if (adapter.itemCount == 0) View.VISIBLE else View.GONE

@@ -47,7 +47,6 @@
     <string name="config_title">Browser setup</string>
     <string name="config_extend">Keep open another 5 minutes</string>
     <string name="config_open">Open setup page</string>
-    <string name="config_offline">Not available — no network address</string>
     <string name="config_stopped">Closed</string>
     <string name="config_closing">Closes in %1$s</string>
     <string name="config_hint">Open this address on a computer to edit every setting.</string>

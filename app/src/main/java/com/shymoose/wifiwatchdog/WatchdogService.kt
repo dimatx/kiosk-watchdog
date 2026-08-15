@@ -34,6 +34,10 @@ class WatchdogService : Service() {
     /** Last probe target, quoted in notifications raised from the escalation ladder. */
     private var lastTargetLabel: String = "?"
 
+    /** What the ongoing notification currently says, so identical updates are dropped. */
+    private var lastNotifiedSummary: String? = null
+    private var lastNotifiedDetail: String? = null
+
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
@@ -336,17 +340,12 @@ class WatchdogService : Service() {
         val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val triggerAt = SystemClock.elapsedRealtime() + delayMs
         val pi = tickIntent(this)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
-        } else {
-            am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
-        }
+        am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
     }
 
     // ---------------------------------------------------------- notifications
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL_ID,
             getString(R.string.channel_name),
@@ -378,8 +377,16 @@ class WatchdogService : Service() {
     }
 
     private fun updateNotification() {
+        val summary = State.summary
+        val detail = State.detail
+        // The ladder re-posts on every probe, but the text only moves when the
+        // link state does. Re-notifying identical content just wakes the
+        // notification stack for nothing.
+        if (summary == lastNotifiedSummary && detail == lastNotifiedDetail) return
+        lastNotifiedSummary = summary
+        lastNotifiedDetail = detail
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-            .notify(NOTIFICATION_ID, buildNotification(State.summary, State.detail))
+            .notify(NOTIFICATION_ID, buildNotification(summary, detail))
     }
 
     // ------------------------------------------------------------- wifi lock
@@ -429,11 +436,7 @@ class WatchdogService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, WatchdogService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            context.startForegroundService(intent)
         }
 
         fun stop(context: Context) {
@@ -444,21 +447,13 @@ class WatchdogService : Service() {
         fun forceHardReset(context: Context) {
             val intent = Intent(context, WatchdogService::class.java)
                 .setAction(ACTION_FORCE_HARD_RESET)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            context.startForegroundService(intent)
         }
 
         fun forceAirplaneCycle(context: Context) {
             val intent = Intent(context, WatchdogService::class.java)
                 .setAction(ACTION_FORCE_AIRPLANE)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+            context.startForegroundService(intent)
         }
 
         fun tickIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(

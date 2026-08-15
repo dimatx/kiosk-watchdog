@@ -341,6 +341,19 @@ class InstallAutoClickService : AccessibilityService() {
         /** When to look at an already-visible window after connecting. */
         private val SWEEP_DELAYS_MS = longArrayOf(1_000L, 3_000L, 8_000L)
 
+        /** Floor between rebind attempts, so a refusal cannot become a log stream. */
+        private const val REPAIR_MIN_INTERVAL_MS = 5 * 60_000L
+
+        /** How long to wait for the framework to bind after rewriting the setting. */
+        private const val REPAIR_CONFIRM_MS = 3_000L
+
+        @Volatile
+        private var nextRepairAt = 0L
+
+        /** Whether the current outage has already been reported once. */
+        @Volatile
+        private var repairReported = false
+
         /** How long a self-test keeps this app's own name allowlisted. */
         private const val SELF_TEST_WINDOW_MS = 120_000L
 
@@ -411,13 +424,25 @@ class InstallAutoClickService : AccessibilityService() {
          * is nothing to do but let the user re-toggle it.
          */
         fun repairIfUnbound(context: Context) {
-            if (instance != null) return
+            if (instance != null) {
+                // Healthy: re-arm, so a later outage is retried and reported again.
+                nextRepairAt = 0L
+                repairReported = false
+                return
+            }
             val prefs = Prefs(context)
             if (!prefs.autoInstallEnabled) return
             if (!isEnabled(context) && !prefs.autoInstallServiceEverOn) return
             if (!AirplaneMode.hasPermission(context)) return
 
-            runCatching {
+            // The framework can decline to bind for reasons nothing here can fix,
+            // and the watchdog ticks every few seconds. Without a floor between
+            // attempts this turns into a permanent stream of identical events.
+            val now = SystemClock.elapsedRealtime()
+            if (now < nextRepairAt) return
+            nextRepairAt = now + REPAIR_MIN_INTERVAL_MS
+
+            val written = runCatching {
                 val resolver = context.contentResolver
                 val component = component(context)
                 val flat = component.flattenToString()
@@ -440,13 +465,43 @@ class InstallAutoClickService : AccessibilityService() {
                     (others + flat).joinToString(":")
                 )
                 Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
-                EventLog.add(
-                    context,
-                    EventLevel.WARN,
-                    "Auto-install service was not running — rebinding it"
-                )
-            }.onFailure {
-                EventLog.add(context, EventLevel.ERROR, "Could not rebind auto-install: ${it.message}")
+            }.isSuccess
+
+            if (!written) {
+                if (!repairReported) {
+                    repairReported = true
+                    EventLog.add(context, EventLevel.ERROR, "Could not rewrite the accessibility setting")
+                }
+                return
+            }
+
+            // Writing the setting is not the same as being bound, so wait for the
+            // callback rather than announcing a repair that did not happen.
+            val deadline = SystemClock.elapsedRealtime() + REPAIR_CONFIRM_MS
+            while (instance == null && SystemClock.elapsedRealtime() < deadline) {
+                Thread.sleep(POLL_MS)
+            }
+
+            when {
+                instance != null -> {
+                    repairReported = false
+                    EventLog.add(
+                        context,
+                        EventLevel.ACTION,
+                        "Auto-install service had stopped — restarted it"
+                    )
+                }
+                // Said once per outage. Repeating it every attempt would bury the
+                // events that actually describe what the watchdog is doing.
+                !repairReported -> {
+                    repairReported = true
+                    EventLog.add(
+                        context,
+                        EventLevel.WARN,
+                        "Auto-install service will not start — turn it on under " +
+                            "Settings, Accessibility"
+                    )
+                }
             }
         }
 
