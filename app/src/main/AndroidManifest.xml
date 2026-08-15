@@ -79,6 +79,18 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            Records that a shutdown was asked for, so the next boot can tell an
+            orderly restart apart from a device that froze.
+        -->
+        <receiver
+            android:name=".ShutdownReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.ACTION_SHUTDOWN" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".TickReceiver"
             android:exported="false" />

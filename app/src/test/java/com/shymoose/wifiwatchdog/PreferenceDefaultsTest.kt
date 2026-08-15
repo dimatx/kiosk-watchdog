@@ -115,6 +115,9 @@ class PreferenceDefaultsTest {
         return (0 until nodes.length)
             .map { nodes.item(it) as Element }
             .filter { it.hasAttribute(ATTR_KEY) }
+            // Nested screens are navigation: their key re-roots the fragment and
+            // never names a stored value.
+            .filter { !it.tagName.endsWith("PreferenceScreen") }
             .map {
                 Entry(
                     key = it.getAttribute(ATTR_KEY),

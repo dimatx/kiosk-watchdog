@@ -14,7 +14,12 @@ import androidx.preference.PreferenceFragmentCompat
 class SettingsFragment : PreferenceFragmentCompat() {
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-        setPreferencesFromResource(R.xml.root_preferences, rootKey)
+        // rootKey is set by the library when a screen is restored; the argument
+        // covers the forward navigation this app drives itself.
+        setPreferencesFromResource(
+            R.xml.root_preferences,
+            rootKey ?: arguments?.getString(ARG_SCREEN)
+        )
 
         numeric(Prefs.KEY_PROBE_PORT)
         numeric(Prefs.KEY_INTERVAL)
@@ -26,10 +31,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         listOf(
             Prefs.KEY_PROBE_HOST,
             Prefs.KEY_PROBE_PORT,
-            Prefs.KEY_INTERVAL,
-            Prefs.KEY_T_REASSOCIATE,
-            Prefs.KEY_T_SOFT,
-            Prefs.KEY_T_HARD,
             Prefs.KEY_NTFY_URL,
             Prefs.KEY_NTFY_TOPIC,
             Prefs.KEY_NTFY_USER,
@@ -41,6 +42,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
             findPreference<EditTextPreference>(key)?.summaryProvider =
                 EditTextPreference.SimpleSummaryProvider.getInstance()
         }
+
+        // The ladder timings read as bare numbers under SimpleSummaryProvider, which
+        // says nothing about what happens at each step. These keep the current value
+        // visible but spell out what it buys.
+        explained(Prefs.KEY_INTERVAL, R.string.pref_interval_summary, Prefs.DEFAULT_INTERVAL)
+        explained(Prefs.KEY_T_REASSOCIATE, R.string.pref_t_reassociate_summary, Prefs.DEFAULT_T_REASSOCIATE)
+        explained(Prefs.KEY_T_SOFT, R.string.pref_t_soft_summary, Prefs.DEFAULT_T_SOFT)
+        explained(Prefs.KEY_T_HARD, R.string.pref_t_hard_summary, Prefs.DEFAULT_T_HARD)
 
         findPreference<EditTextPreference>(Prefs.KEY_NTFY_PASSWORD)?.setOnBindEditTextListener {
             it.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -78,6 +87,15 @@ class SettingsFragment : PreferenceFragmentCompat() {
             it.inputType = InputType.TYPE_CLASS_NUMBER
             it.setSelection(it.text?.length ?: 0)
         }
+    }
+
+    /** Summary that reads as a sentence with the current value in it. */
+    private fun explained(key: String, template: Int, fallback: Int) {
+        findPreference<EditTextPreference>(key)?.summaryProvider =
+            Preference.SummaryProvider<EditTextPreference> { preference ->
+                val value = preference.text?.takeIf { it.isNotBlank() } ?: fallback.toString()
+                getString(template, value)
+            }
     }
 
     override fun onPreferenceTreeClick(preference: Preference): Boolean {
@@ -146,5 +164,14 @@ class SettingsFragment : PreferenceFragmentCompat() {
             return true
         }
         return super.onPreferenceTreeClick(preference)
+    }
+
+    companion object {
+        private const val ARG_SCREEN = "screen_key"
+
+        /** A fragment rooted at one nested screen rather than the whole tree. */
+        fun forScreen(key: String): SettingsFragment = SettingsFragment().apply {
+            arguments = Bundle().apply { putString(ARG_SCREEN, key) }
+        }
     }
 }

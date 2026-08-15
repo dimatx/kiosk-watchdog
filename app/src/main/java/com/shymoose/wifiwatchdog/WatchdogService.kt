@@ -134,6 +134,13 @@ class WatchdogService : Service() {
         val now = System.currentTimeMillis()
         if (prefs.lastGoodAtMillis == 0L) prefs.lastGoodAtMillis = now
 
+        // Written every check so that if the device stops responding, the last
+        // value on disk says roughly when. Nothing else survives a hang: the
+        // event log is rolled back with the rest of the unflushed writes, and
+        // adb over the network does not come back after the power cycle.
+        prefs.lastAliveAtMillis = now
+        if (prefs.cleanShutdown) prefs.cleanShutdown = false
+
         InstallAutoClickService.repairIfUnbound(this)
 
         val target = probe.resolveTarget(prefs)

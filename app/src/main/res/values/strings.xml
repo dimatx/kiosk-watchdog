@@ -80,11 +80,15 @@
     <string name="pref_probe_port">Probe port</string>
     <string name="pref_probe_port_summary">TCP fallback when ICMP fails. Only used with a pinned host; the gateway falls back to 53.</string>
     <string name="pref_interval">Check interval (seconds)</string>
+    <string name="pref_interval_summary">Every %1$s seconds — how often the connection is tested.</string>
 
     <string name="cat_escalation">Recovery ladder</string>
     <string name="pref_t_reassociate">Re-associate after (seconds down)</string>
+    <string name="pref_t_reassociate_summary">After %1$s seconds down: ask Wi-Fi to rejoin the network. Nothing is torn down.</string>
     <string name="pref_t_soft">Wi-Fi off/on after (seconds down)</string>
+    <string name="pref_t_soft_summary">After %1$s seconds down: switch Wi-Fi off and back on.</string>
     <string name="pref_t_hard">Full driver reload after (seconds down)</string>
+    <string name="pref_t_hard_summary">After %1$s seconds down: unload the Wi-Fi driver so it starts from scratch.</string>
     <string name="pref_hard_enabled">Allow full driver reload</string>
     <string name="pref_hard_enabled_summary">Uses WRITE_SECURE_SETTINGS to unload and reload the Wi-Fi driver — the airplane-mode equivalent.</string>
 
@@ -96,6 +100,16 @@
     <string name="pref_airplane_dwell">Airplane dwell (seconds)</string>
     <string name="pref_airplane_dwell_summary">How long to stay in airplane mode before switching back.</string>
     <string name="pref_needs_adb">Unavailable — needs WRITE_SECURE_SETTINGS, which can only be granted over adb.</string>
+
+    <!-- Top-level settings menu. Each opens a screen; the summary says what lives there. -->
+    <string name="screen_probe">Connection check</string>
+    <string name="screen_probe_summary">What to reach, and how often</string>
+    <string name="screen_recovery">Recovery steps</string>
+    <string name="screen_recovery_summary">What to try when the link stops answering</string>
+    <string name="screen_updates">App updates</string>
+    <string name="screen_updates_summary">Confirm update dialogs for apps that update themselves</string>
+    <string name="screen_alerts">Alerts and heartbeat</string>
+    <string name="screen_alerts_summary">Push notifications, and the ping that proves this display is alive</string>
 
     <string name="cat_reporting">Notifications (ntfy)</string>
     <string name="pref_ntfy_url">Server URL</string>

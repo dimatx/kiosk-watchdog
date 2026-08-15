@@ -61,6 +61,27 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_AIRPLANE_PENDING, false)
         set(value) = sp.edit().putBoolean(KEY_AIRPLANE_PENDING, value).commit().let { }
 
+    /**
+     * When the watchdog was last known to be running, written on every check.
+     *
+     * Committed rather than applied: the whole point is to survive a device that
+     * stops responding, and an asynchronous write is exactly what gets rolled
+     * back when the power is pulled.
+     */
+    var lastAliveAtMillis: Long
+        get() = sp.getLong(KEY_LAST_ALIVE, 0L)
+        set(value) = sp.edit().putLong(KEY_LAST_ALIVE, value).commit().let { }
+
+    /**
+     * Cleared while running, set only when Android tells us it is shutting down.
+     *
+     * Still false at boot means the device stopped without warning, which is the
+     * difference between "someone rebooted it" and "it froze".
+     */
+    var cleanShutdown: Boolean
+        get() = sp.getBoolean(KEY_CLEAN_SHUTDOWN, true)
+        set(value) = sp.edit().putBoolean(KEY_CLEAN_SHUTDOWN, value).commit().let { }
+
     /** Whatever held the assistant slot before we took it, so it can be handed back. */
     var previousAssistant: String
         get() = sp.getString(KEY_PREV_ASSISTANT, "")!!
@@ -173,6 +194,8 @@ class Prefs(context: Context) {
         private const val KEY_HEARTBEAT_LAST = "heartbeat_last_at"
         private const val KEY_LAST_GOOD = "last_good_at"
         private const val KEY_AIRPLANE_PENDING = "airplane_pending"
+        private const val KEY_LAST_ALIVE = "last_alive_at"
+        private const val KEY_CLEAN_SHUTDOWN = "clean_shutdown"
         private const val KEY_AUTO_INSTALL_EVER_ON = "auto_install_service_ever_on"
         private const val KEY_PREV_ASSISTANT = "previous_assistant"
         private const val KEY_LAST_GATEWAY = "last_gateway"
