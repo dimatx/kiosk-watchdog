@@ -142,14 +142,59 @@ class PreferenceDefaultsTest {
                     File(".").absolutePath
             )
 
+    /**
+     * The browser config page is the third place a default is written down, and the
+     * only one nothing checked. A `Kind.BOOL` field with no default reports itself as
+     * off on any device that has never written the key, so the page renders the switch
+     * unchecked and `/export` says false — which then switches the feature off for real
+     * on whichever display that config gets cloned to.
+     *
+     * Read as text because the field table is private to `ConfigServer`.
+     */
+    @Test
+    fun `every boolean on the config page declares its default`() {
+        val source = configServerSource().readText()
+        expectedDefaults
+            .filterValues { it == "true" || it == "false" }
+            .forEach { (key, expected) ->
+                val call = fieldCall(source, key)
+                assertTrue(
+                    "ConfigServer's field for $key declares no default, so the config " +
+                        "page and /export will report it as false regardless of $expected",
+                    call.contains("\"$expected\"") || call.contains("DEFAULT_")
+                )
+            }
+    }
+
+    /** The text of the `Field(...)` call for [key], stopping before the next field. */
+    private fun fieldCall(source: String, key: String): String {
+        val constant = prefsKeys().entries.first { it.value == key }.key
+        val at = source.indexOf("Prefs.$constant,")
+        assertTrue("ConfigServer has no field for $key", at >= 0)
+        return source.substring(at, minOf(at + FIELD_SCAN_CHARS, source.length))
+            .substringBefore("Field(")
+    }
+
+    private fun configServerSource(): File =
+        CONFIG_SERVER_CANDIDATES.map(::File).firstOrNull { it.isFile }
+            ?: error("ConfigServer.kt not found from working directory " + File(".").absolutePath)
+
     private companion object {
         const val ATTR_KEY = "app:key"
         const val ATTR_DEFAULT = "app:defaultValue"
+
+        /** Enough to cover one field declaration, which is a handful of lines. */
+        const val FIELD_SCAN_CHARS = 400
 
         /** Gradle runs unit tests from the module directory; the second entry covers a repo-root run. */
         val SETTINGS_XML_CANDIDATES = listOf(
             "src/main/res/xml/root_preferences.xml",
             "app/src/main/res/xml/root_preferences.xml"
+        )
+
+        val CONFIG_SERVER_CANDIDATES = listOf(
+            "src/main/java/com/shymoose/wifiwatchdog/ConfigServer.kt",
+            "app/src/main/java/com/shymoose/wifiwatchdog/ConfigServer.kt"
         )
     }
 }

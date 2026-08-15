@@ -604,7 +604,8 @@ object ConfigServer {
                 Field(
                     Prefs.KEY_AUTO_INSTALL_ENABLED, "Confirm update dialogs", Kind.BOOL,
                     "Taps INSTALL for allowlisted apps. Needs the accessibility service " +
-                        "enabled from the on-device settings screen."
+                        "enabled from the on-device settings screen.",
+                    Prefs.DEFAULT_AUTO_INSTALL_ENABLED.toString()
                 ),
                 Field(
                     Prefs.KEY_AUTO_INSTALL_ALLOWLIST, "Allowed apps", Kind.TEXT,

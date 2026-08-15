@@ -129,7 +129,7 @@ class Prefs(context: Context) {
 
     /** Whether the accessibility service may confirm package-installer dialogs. */
     val autoInstallEnabled: Boolean
-        get() = sp.getBoolean(KEY_AUTO_INSTALL_ENABLED, true)
+        get() = sp.getBoolean(KEY_AUTO_INSTALL_ENABLED, DEFAULT_AUTO_INSTALL_ENABLED)
 
     /**
      * Comma-separated app labels whose update dialogs may be confirmed.
@@ -200,5 +200,13 @@ class Prefs(context: Context) {
 
         /** The one app on these displays that self-updates and blocks on a tap. */
         const val DEFAULT_AUTO_INSTALL_ALLOWLIST = "Kiosk Satellite"
+
+        /**
+         * Kept as a constant rather than an inline `true` so `ConfigServer` and the
+         * settings XML can be checked against it. When this was a literal, the web
+         * form declared no default at all and reported the feature as off on any
+         * device that had never written the key.
+         */
+        const val DEFAULT_AUTO_INSTALL_ENABLED = true
     }
 }
