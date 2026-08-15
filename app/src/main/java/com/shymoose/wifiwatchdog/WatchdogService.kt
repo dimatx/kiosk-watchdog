@@ -142,6 +142,10 @@ class WatchdogService : Service() {
         if (prefs.cleanShutdown) prefs.cleanShutdown = false
 
         InstallAutoClickService.repairIfUnbound(this)
+        // An install dialog can appear while the display is asleep, where nothing
+        // else will notice it. This alarm runs through Doze, so it is the one
+        // thing that can.
+        InstallAutoClickService.sweepIfBound()
 
         val target = probe.resolveTarget(prefs)
         val probeStartedAt = SystemClock.elapsedRealtime()

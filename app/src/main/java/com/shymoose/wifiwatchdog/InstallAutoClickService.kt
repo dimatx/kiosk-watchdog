@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.PowerManager
 import android.os.Process
 import android.os.SystemClock
 import android.provider.Settings
@@ -79,6 +80,52 @@ open class InstallAutoClickService : AccessibilityService() {
      * Retried a few times because [rootInActiveWindow] is often still null in
      * the first moments after a bind.
      */
+    /**
+     * Handles whatever is already on screen, on demand.
+     *
+     * The watchdog calls this on its own schedule because an install dialog can
+     * appear while the display is asleep. Accessibility events are delivered to a
+     * process that Doze has stopped scheduling, so the dialog can sit there
+     * untouched until somebody walks over and wakes the screen - which is exactly
+     * what a wall display is supposed to avoid. The watchdog's alarm runs through
+     * Doze, so polling from there catches it.
+     */
+    fun sweepNow() {
+        val root = rootInActiveWindow ?: return
+        try {
+            if (root.packageName?.toString()?.let { isInstaller(this, it) } != true) return
+            wakeScreen()
+            handle(root)
+        } catch (t: Throwable) {
+            EventLog.add(this, EventLevel.ERROR, "Install auto-click sweep failed: ${t.message}")
+        } finally {
+            root.recycle()
+        }
+    }
+
+    /**
+     * Brings the display up long enough for a tap to register.
+     *
+     * A click on a node is delivered whether or not the screen is lit, but the
+     * installer's own progress and completion screens are driven by the window
+     * being live, and a display that is asleep has been observed sitting on the
+     * confirm dialog indefinitely. Held briefly and released; the normal screen
+     * timeout takes it from there.
+     */
+    private fun wakeScreen() {
+        val power = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+        if (power.isInteractive) return
+        runCatching {
+            @Suppress("DEPRECATION")
+            val lock = power.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "KioskWatchdog::install"
+            )
+            lock.acquire(SCREEN_WAKE_MS)
+            EventLog.add(this, EventLevel.INFO, "Woke the display for an install dialog")
+        }
+    }
+
     private fun sweepCurrentWindow() {
         val handler = android.os.Handler(mainLooper)
         SWEEP_DELAYS_MS.forEach { delay ->
@@ -288,6 +335,11 @@ open class InstallAutoClickService : AccessibilityService() {
         @Volatile
         private var instance: InstallAutoClickService? = null
 
+        /** Runs a sweep if the service is bound; a no-op otherwise. */
+        fun sweepIfBound() {
+            instance?.sweepNow()
+        }
+
         private val INSTALLER_PACKAGES = setOf(
             "com.google.android.packageinstaller",
             "com.android.packageinstaller"
@@ -342,6 +394,9 @@ open class InstallAutoClickService : AccessibilityService() {
 
         /** When to look at an already-visible window after connecting. */
         private val SWEEP_DELAYS_MS = longArrayOf(1_000L, 3_000L, 8_000L)
+
+        /** Long enough for the installer to advance; the screen timeout resumes after. */
+        private const val SCREEN_WAKE_MS = 30_000L
 
         /** Floor between rebind attempts, so a refusal cannot become a log stream. */
         private const val REPAIR_MIN_INTERVAL_MS = 5 * 60_000L
