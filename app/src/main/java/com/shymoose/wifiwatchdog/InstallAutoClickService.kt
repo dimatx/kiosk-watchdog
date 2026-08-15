@@ -340,6 +340,19 @@ open class InstallAutoClickService : AccessibilityService() {
             instance?.sweepNow()
         }
 
+        /**
+         * The package owning the window in front, or null when that cannot be
+         * determined - which is the case whenever the service is not bound.
+         */
+        fun foregroundPackage(): String? = runCatching {
+            val root = instance?.rootInActiveWindow ?: return null
+            try {
+                root.packageName?.toString()
+            } finally {
+                root.recycle()
+            }
+        }.getOrNull()
+
         private val INSTALLER_PACKAGES = setOf(
             "com.google.android.packageinstaller",
             "com.android.packageinstaller"

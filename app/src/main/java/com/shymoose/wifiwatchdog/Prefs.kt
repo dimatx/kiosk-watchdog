@@ -153,6 +153,24 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_AUTO_INSTALL_ENABLED, DEFAULT_AUTO_INSTALL_ENABLED)
 
     /**
+     * Whether to hold Bluetooth off.
+     *
+     * Wi-Fi and Bluetooth share a chip here, so on a display that does not use
+     * Bluetooth this is one less thing competing with the link the watchdog
+     * exists to protect.
+     */
+    val keepBluetoothOff: Boolean
+        get() = sp.getBoolean(KEY_KEEP_BT_OFF, DEFAULT_KEEP_BT_OFF)
+
+    /** Package to put back in front; blank turns the behaviour off. */
+    val kioskPackage: String
+        get() = sp.getString(KEY_KIOSK_PACKAGE, DEFAULT_KIOSK_PACKAGE)!!.trim()
+
+    /** How long this app may sit in front before the kiosk is restored. */
+    val kioskReturnAfterMin: Int
+        get() = intPref(KEY_KIOSK_RETURN_MIN, DEFAULT_KIOSK_RETURN_MIN, 1, 240)
+
+    /**
      * Comma-separated app labels whose update dialogs may be confirmed.
      *
      * Matched against the label the installer renders, because the node tree
@@ -188,6 +206,9 @@ class Prefs(context: Context) {
         const val KEY_HEARTBEAT_INTERVAL = "heartbeat_interval_sec"
         const val KEY_HEARTBEAT_TEST = "heartbeat_test"
         const val KEY_AUTO_INSTALL_ENABLED = "auto_install_enabled"
+        const val KEY_KEEP_BT_OFF = "keep_bluetooth_off"
+        const val KEY_KIOSK_PACKAGE = "kiosk_package"
+        const val KEY_KIOSK_RETURN_MIN = "kiosk_return_after_min"
         const val KEY_AUTO_INSTALL_ALLOWLIST = "auto_install_allowlist"
         const val KEY_AUTO_INSTALL_SETUP = "auto_install_setup"
         const val KEY_AUTO_INSTALL_TEST = "auto_install_test"
@@ -231,5 +252,15 @@ class Prefs(context: Context) {
          * device that had never written the key.
          */
         const val DEFAULT_AUTO_INSTALL_ENABLED = true
+
+        /** Off by default: a display that genuinely uses Bluetooth should keep it. */
+        const val DEFAULT_KEEP_BT_OFF = false
+
+        /**
+         * Harmless when absent - the feature checks the package is installed - so
+         * this ships pointed at the kiosk app these displays actually run.
+         */
+        const val DEFAULT_KIOSK_PACKAGE = "me.jxl.kiosk_satellite"
+        const val DEFAULT_KIOSK_RETURN_MIN = 5
     }
 }

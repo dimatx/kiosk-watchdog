@@ -435,7 +435,18 @@ object ConfigServer {
             else -> {
                 val field = FIELDS.firstOrNull { it.key == key } ?: return "Unknown field."
                 when (field.kind) {
-                    Kind.BOOL -> sp.edit().putBoolean(key, value == "1").apply()
+                    // Only "1" used to count as true, so a scripted call sending
+                    // "true" stored false and still answered "Saved". The browser
+                    // form posts "1", so this only ever bit automation - silently,
+                    // which is the worst way for it to bite.
+                    Kind.BOOL -> {
+                        val on = when (value.lowercase()) {
+                            "1", "true", "on", "yes" -> true
+                            "0", "false", "off", "no" -> false
+                            else -> return "Expected a yes or no value for '$key', got '$value'."
+                        }
+                        sp.edit().putBoolean(key, on).apply()
+                    }
                     // Blank means "leave the stored secret alone"; the clear checkbox
                     // is the only way to erase it.
                     Kind.PASSWORD -> if (value.isNotEmpty()) sp.edit().putString(key, value).apply()
@@ -617,7 +628,12 @@ object ConfigServer {
                     Prefs.KEY_T_HARD, "Hard reset after (s)", Kind.NUMBER,
                     "Rung 3: full driver unload.", Prefs.DEFAULT_T_HARD.toString()
                 ),
-                Field(Prefs.KEY_HARD_ENABLED, "Enable hard reset", Kind.BOOL, "", "true")
+                Field(Prefs.KEY_HARD_ENABLED, "Enable hard reset", Kind.BOOL, "", "true"),
+                Field(
+                    Prefs.KEY_KEEP_BT_OFF, "Keep Bluetooth off", Kind.BOOL,
+                    "Bluetooth shares a chip with Wi-Fi; scanning competes with the link.",
+                    Prefs.DEFAULT_KEEP_BT_OFF.toString()
+                )
             )
         ),
         Section(
@@ -675,6 +691,15 @@ object ConfigServer {
                     Prefs.KEY_AUTO_INSTALL_ALLOWLIST, "Allowed apps", Kind.TEXT,
                     "Comma-separated app names as shown in the install dialog.",
                     Prefs.DEFAULT_AUTO_INSTALL_ALLOWLIST
+                ),
+                Field(
+                    Prefs.KEY_KIOSK_PACKAGE, "Kiosk app package", Kind.TEXT,
+                    "Put back in front when this app is left showing. Blank turns it off.",
+                    Prefs.DEFAULT_KIOSK_PACKAGE
+                ),
+                Field(
+                    Prefs.KEY_KIOSK_RETURN_MIN, "Return to kiosk after (min)", Kind.NUMBER,
+                    "1-240.", Prefs.DEFAULT_KIOSK_RETURN_MIN.toString()
                 )
             )
         )

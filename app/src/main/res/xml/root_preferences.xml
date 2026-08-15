@@ -58,6 +58,11 @@
                 app:key="hard_reset_enabled"
                 app:summary="@string/pref_hard_enabled_summary"
                 app:title="@string/pref_hard_enabled" />
+            <SwitchPreferenceCompat
+                app:defaultValue="false"
+                app:key="keep_bluetooth_off"
+                app:summary="@string/pref_keep_bt_off_summary"
+                app:title="@string/pref_keep_bt_off" />
         </PreferenceCategory>
 
         <PreferenceCategory app:title="@string/cat_airplane">
@@ -102,6 +107,19 @@
                 app:key="auto_install_test"
                 app:summary="@string/pref_auto_install_test_summary"
                 app:title="@string/pref_auto_install_test" />
+        </PreferenceCategory>
+
+        <PreferenceCategory app:title="@string/cat_kiosk">
+            <EditTextPreference
+                app:defaultValue="me.jxl.kiosk_satellite"
+                app:key="kiosk_package"
+                app:summary="@string/pref_kiosk_package_summary"
+                app:title="@string/pref_kiosk_package" />
+            <EditTextPreference
+                app:defaultValue="5"
+                app:key="kiosk_return_after_min"
+                app:summary="@string/pref_kiosk_return_summary"
+                app:title="@string/pref_kiosk_return" />
         </PreferenceCategory>
     </PreferenceScreen>
 

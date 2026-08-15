@@ -142,6 +142,8 @@ class WatchdogService : Service() {
         if (prefs.cleanShutdown) prefs.cleanShutdown = false
 
         InstallAutoClickService.repairIfUnbound(this)
+        BluetoothGuard.enforce(this)
+        KioskReturn.check(this)
         // An install dialog can appear while the display is asleep, where nothing
         // else will notice it. This alarm runs through Doze, so it is the one
         // thing that can.
