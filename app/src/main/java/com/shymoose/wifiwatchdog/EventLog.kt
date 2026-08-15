@@ -55,7 +55,13 @@ object EventLog {
             array
         }
 
-        sp.edit().putString(KEY, trimmed.toString()).apply()
+        // Anything that is not routine is written through to disk. Shared
+        // preferences are otherwise flushed on their own schedule, and a device
+        // that freezes loses whatever had not landed - which is reliably the
+        // handful of entries that would have explained it. Routine chatter stays
+        // asynchronous so the common path is not paying for this.
+        val editor = sp.edit().putString(KEY, trimmed.toString())
+        if (level == EventLevel.INFO) editor.apply() else editor.commit()
         notifyListeners()
     }
 

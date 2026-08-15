@@ -153,6 +153,10 @@ class WatchdogService : Service() {
         val label = describeTarget(this, target)
         lastTargetLabel = label
 
+        // Recorded before any recovery runs, so the picture is of the device as
+        // it was found rather than after the ladder started acting on it.
+        Vitals.record(this, State.wifi, State.stage, reachable)
+
         if (reachable) {
             if (State.stage > 0 || State.consecutiveFailures > 0) {
                 val downFor = (now - prefs.lastGoodAtMillis) / 1000

@@ -57,19 +57,31 @@ class BootReceiver : BroadcastReceiver() {
 
         val stoppedAt = LogEvent(lastAlive, EventLevel.WARN, "").formattedTime()
         val downFor = WatchdogService.formatDuration(goneForSec)
+
+        // The readings from before it went quiet are the only account of what the
+        // device was doing; nothing else survived.
+        val trail = Vitals.leadingUpTo(app, lastAlive, TRAIL_SAMPLES)
+        val trailText = if (trail.isEmpty()) {
+            "No readings were recorded before it stopped."
+        } else {
+            "Last readings:\n" + trail.joinToString("\n") { it.describe() }
+        }
+
         EventLog.add(
             app,
             EventLevel.WARN,
             "Device stopped responding at $stoppedAt and was down for $downFor — " +
                 "it did not shut down cleanly"
         )
+        trail.lastOrNull()?.let {
+            EventLog.add(app, EventLevel.INFO, "State just before it stopped: ${it.describe()}")
+        }
         Ntfy.enqueue(
             app,
             Ntfy.Message(
                 title = "Display stopped responding",
                 body = "${DeviceIdentity.hostname(app)} was last alive at $stoppedAt and was " +
-                    "down for $downFor. It did not shut down cleanly, so nothing was " +
-                    "recorded on the device itself.",
+                    "down for $downFor. It did not shut down cleanly.\n\n$trailText",
                 priority = 4,
                 tags = "warning"
             )
@@ -79,5 +91,8 @@ class BootReceiver : BroadcastReceiver() {
     private companion object {
         /** Long enough that a deliberate reboot is not reported as a freeze. */
         const val UNCLEAN_STOP_THRESHOLD_SEC = 300L
+
+        /** Enough readings to show a trend without making the notification unreadable. */
+        const val TRAIL_SAMPLES = 8
     }
 }

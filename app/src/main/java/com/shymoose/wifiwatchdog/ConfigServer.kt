@@ -46,6 +46,9 @@ object ConfigServer {
     /** Enough to keep a browser's parallel connections moving, few enough to bound them. */
     private const val WORKER_THREADS = 4
 
+    /** Readings returned by /vitals — a few hours at the default interval. */
+    private const val VITALS_PAGE = 400
+
     @Volatile
     private var expiresAtMillis = 0L
 
@@ -221,6 +224,24 @@ object ConfigServer {
             method == "POST" && path == "/action" -> {
                 val message = action(context, parse(body)["a"].orEmpty())
                 redirect(out, message)
+            }
+
+            // Plain text on purpose: this is read when a display has misbehaved,
+            // often from a phone, and it should paste straight into a report.
+            path == "/vitals" -> {
+                val lines = Vitals.recent(context, VITALS_PAGE)
+                val text = if (lines.isEmpty()) {
+                    "No readings recorded yet.\n"
+                } else {
+                    lines.joinToString("\n") { it.describe() } + "\n"
+                }
+                val bytes = text.toByteArray(Charsets.UTF_8).size
+                out.write(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n" +
+                        "Content-Length: $bytes\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+                )
+                out.write(text)
+                out.flush()
             }
 
             method == "POST" && path == "/import" -> {
