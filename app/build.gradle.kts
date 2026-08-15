@@ -29,8 +29,8 @@ android {
         // Must stay <= 28: WifiManager.setWifiEnabled() is a no-op for apps
         // targeting API 29+, and that call is the core of the recovery ladder.
         targetSdk = 28
-        versionCode = 10
-        versionName = "1.4.0"
+        versionCode = 12
+        versionName = "1.5.0"
     }
 
     signingConfigs {

@@ -8,13 +8,15 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.BufferedInputStream
+import java.io.InputStream
 import java.io.OutputStreamWriter
 import java.net.BindException
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import org.json.JSONObject
 
 /**
@@ -37,6 +39,12 @@ object ConfigServer {
 
     @Volatile
     private var server: ServerSocket? = null
+
+    @Volatile
+    private var workers: ExecutorService? = null
+
+    /** Enough to keep a browser's parallel connections moving, few enough to bound them. */
+    private const val WORKER_THREADS = 4
 
     @Volatile
     private var expiresAtMillis = 0L
@@ -79,6 +87,9 @@ object ConfigServer {
         }
         server = socket
         port = socket.localPort
+        workers = Executors.newFixedThreadPool(WORKER_THREADS) { r ->
+            Thread(r, "config-server-worker").apply { isDaemon = true }
+        }
         Thread({ serve(app, socket) }, "config-server").apply { isDaemon = true }.start()
         Log.i(TAG, "listening on $port")
     }
@@ -90,12 +101,13 @@ object ConfigServer {
         server = null
         port = 0
         expiresAtMillis = 0L
+        workers?.shutdownNow()
+        workers = null
         // Unblocks accept(), which is how the serving thread learns to exit.
         runCatching { socket.close() }
     }
 
-    private fun bind(): ServerSocket? {
-        for (candidate in PORT_RANGE) {
+    private fun bind(): ServerSocket? {        for (candidate in PORT_RANGE) {
             try {
                 return ServerSocket(candidate)
             } catch (_: BindException) {
@@ -114,19 +126,48 @@ object ConfigServer {
             } catch (_: Exception) {
                 break // Closed by stop(), or the interface went away.
             }
-            runCatching { handle(context, client) }
-                .onFailure { Log.w(TAG, "request failed", it) }
-            runCatching { client.close() }
+            // Off the accept loop: browsers routinely open a speculative
+            // connection and send nothing on it, and handling inline meant that
+            // socket held up every other request until its read timed out.
+            val worker = workers
+            if (worker == null || worker.isShutdown) {
+                runCatching { client.close() }
+                break
+            }
+            runCatching {
+                worker.execute {
+                    runCatching { handle(context, client) }
+                        .onFailure { Log.w(TAG, "request failed", it) }
+                    runCatching { client.close() }
+                }
+            }.onFailure { runCatching { client.close() } }
         }
         Log.i(TAG, "stopped")
     }
 
     // --------------------------------------------------------------- HTTP
 
+    /**
+     * Reads one CRLF-terminated line straight off the socket.
+     *
+     * Deliberately not a `BufferedReader`: a decoder pulls ahead into its own
+     * buffer, which would swallow the first bytes of the body before it can be
+     * read at its declared byte length.
+     */
+    private fun readLine(input: InputStream): String? {
+        val line = StringBuilder()
+        while (true) {
+            val c = input.read()
+            if (c < 0) return if (line.isEmpty()) null else line.toString()
+            if (c == '\n'.code) return line.toString().removeSuffix("\r")
+            line.append(c.toChar())
+        }
+    }
+
     private fun handle(context: Context, client: Socket) {
         client.soTimeout = 10_000
-        val input = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
-        val requestLine = input.readLine() ?: return
+        val input = BufferedInputStream(client.getInputStream())
+        val requestLine = readLine(input) ?: return
         val parts = requestLine.split(' ')
         if (parts.size < 2) return
         val method = parts[0]
@@ -136,24 +177,26 @@ object ConfigServer {
 
         var contentLength = 0
         while (true) {
-            val header = input.readLine() ?: break
+            val header = readLine(input) ?: break
             if (header.isEmpty()) break
             if (header.startsWith("Content-Length:", ignoreCase = true)) {
                 contentLength = header.substringAfter(':').trim().toIntOrNull() ?: 0
             }
         }
 
-        // Form bodies are percent-encoded, so they are pure ASCII and a char-count
-        // read is equivalent to a byte-count read.
+        // Content-Length counts bytes. Reading that many *characters* through a
+        // decoder works only while the body is ASCII, and /import takes arbitrary
+        // JSON — a single non-ASCII character left the read waiting for input that
+        // was never coming, until the socket timed out and the body was truncated.
         val body = if (method == "POST" && contentLength > 0) {
-            val buffer = CharArray(contentLength)
+            val buffer = ByteArray(contentLength)
             var read = 0
             while (read < contentLength) {
                 val n = input.read(buffer, read, contentLength - read)
                 if (n < 0) break
                 read += n
             }
-            String(buffer, 0, read)
+            String(buffer, 0, read, Charsets.UTF_8)
         } else ""
 
         val out = OutputStreamWriter(client.getOutputStream(), Charsets.UTF_8)

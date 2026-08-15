@@ -150,6 +150,29 @@
         </service>
 
         <!--
+            Standby identity for the service above, disabled so it stays out of the
+            Accessibility list. Replacing the app can leave the framework holding a
+            stale binding record for the primary component, after which that name is
+            skipped forever - by this app and by the Accessibility screen alike, with
+            only a reboot clearing it. This one is a different name, so the record
+            does not apply. The app enables it only on hitting that state, and hides
+            it again once the primary works.
+        -->
+        <service
+            android:name=".InstallAutoClickServiceAlt"
+            android:enabled="false"
+            android:exported="true"
+            android:label="@string/a11y_install_label_alt"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/install_click_service" />
+        </service>
+
+        <!--
             Hands the app's own APK to the package installer for the auto-confirm
             self-test. A file:// URI would trip FileUriExposedException, so the
             copy is served from the cache dir through a content:// URI instead.

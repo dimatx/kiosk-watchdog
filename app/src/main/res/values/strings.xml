@@ -139,6 +139,9 @@
 
     <string name="cat_auto_install">App update auto-confirm</string>
     <string name="a11y_install_label">Kiosk Watchdog install auto-confirm</string>
+    <!-- Only ever used when the system has permanently blocked the entry above; named
+         so the two are told apart in the Accessibility list, where both are shown. -->
+    <string name="a11y_install_label_alt">Kiosk Watchdog install auto-confirm (standby)</string>
     <string name="a11y_install_description">Taps INSTALL on the system update dialog for allowlisted apps, so a display mounted on a wall can finish an app update without anyone walking over to it. Only the package installer\'s own screens are ever read.</string>
     <string name="pref_auto_install_enabled">Confirm update dialogs</string>
     <string name="pref_auto_install_enabled_summary">Taps INSTALL when an allowlisted app updates itself, then dismisses the completion screen with OPEN so the app comes back up. Also needs the accessibility service turned on below.</string>
