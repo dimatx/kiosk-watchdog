@@ -44,7 +44,9 @@ object Vitals {
         val iface: String = "",
         val bssid: String = "",
         val rxMb: Long = 0,
-        val mv: Int = 0
+        val mv: Int = 0,
+        val wlanCrashes: Int = 0,
+        val wlanSubsys: String = ""
     ) {
         fun encode(): String = listOf(
             at.toString(),
@@ -60,7 +62,9 @@ object Vitals {
             iface,
             bssid,
             rxMb.toString(),
-            mv.toString()
+            mv.toString(),
+            wlanCrashes.toString(),
+            wlanSubsys
         ).joinToString(",")
 
         /** Readable form, for the report sent after a freeze. */
@@ -73,8 +77,16 @@ object Vitals {
             }
             val radio = if (iface.isEmpty()) " iface gone" else " $iface"
             val ap = if (bssid.isEmpty()) "" else " ap $bssid"
+            // Only worth the width when it is saying something.
+            val radioFw = buildString {
+                if (wlanCrashes > 0) append("  fw-crashes $wlanCrashes")
+                // Printed even when healthy: an empty value means the counter
+                // could not be read at all, which is worth knowing before
+                // relying on it to explain a freeze.
+                append(if (wlanSubsys.isEmpty()) "  wlan ?" else "  wlan ${wlanSubsys.lowercase()}")
+            }
             return "$clock  up ${uptimeSec / 60}m  mem ${memAvailMb}MB  load $load1  " +
-                "${tempC}C  $link$radio$ap  rx ${rxMb}MB  ${mv}mV  stage $stage"
+                "${tempC}C  $link$radio$ap  rx ${rxMb}MB  ${mv}mV  stage $stage$radioFw"
         }
 
         companion object {
@@ -96,7 +108,9 @@ object Vitals {
                     iface = f.getOrNull(10).orEmpty(),
                     bssid = f.getOrNull(11).orEmpty(),
                     rxMb = f.getOrNull(12)?.toLongOrNull() ?: 0,
-                    mv = f.getOrNull(13)?.toIntOrNull() ?: 0
+                    mv = f.getOrNull(13)?.toIntOrNull() ?: 0,
+                    wlanCrashes = f.getOrNull(14)?.toIntOrNull() ?: 0,
+                    wlanSubsys = f.getOrNull(15).orEmpty()
                 )
             }
         }
@@ -109,6 +123,7 @@ object Vitals {
      * for the one event this exists to explain.
      */
     fun record(context: Context, wifi: WifiStatus?, stage: Int, online: Boolean) {
+        val wlan = readWlanSubsys()
         val sample = Sample(
             at = System.currentTimeMillis(),
             uptimeSec = readUptimeSec(),
@@ -123,7 +138,9 @@ object Vitals {
             iface = readIfaceState(),
             bssid = wifi?.bssid?.takeLast(8).orEmpty(),
             rxMb = readRxBytes() / (1024 * 1024),
-            mv = readMilliVolts()
+            mv = readMilliVolts(),
+            wlanCrashes = wlan?.second ?: 0,
+            wlanSubsys = wlan?.first.orEmpty()
         )
         runCatching {
             val file = File(context.filesDir, FILE)
@@ -215,6 +232,35 @@ object Vitals {
         // Reported in microvolts on this platform, millivolts on others.
         (if (raw > 100_000) raw / 1000 else raw).toInt()
     }.getOrDefault(0)
+
+    /**
+     * State and crash count of the Wi-Fi subsystem, as the kernel sees it.
+     *
+     * Wi-Fi runs as firmware on its own subsystem, and when that firmware
+     * asserts the kernel restarts it and increments a counter. A counter that
+     * climbs in the minutes before a display stops is the difference between
+     * "the radio died and took the device with it" and "something else did" -
+     * which is otherwise unanswerable, because a hang leaves no kernel log on
+     * hardware without a persistent crash buffer.
+     *
+     * World-readable on this platform despite documentation suggesting
+     * otherwise, so it is worth sampling.
+     */
+    private fun readWlanSubsys(): Pair<String, Int>? = runCatching {
+        File("/sys/bus/msm_subsys").resolve("devices").listFiles()
+            ?.firstOrNull { dev ->
+                runCatching { File(dev, "name").readText().trim() }
+                    .getOrDefault("")
+                    .let { it.startsWith("AR6") || it.contains("wcnss", ignoreCase = true) }
+            }
+            ?.let { dev ->
+                val state = runCatching { File(dev, "state").readText().trim() }.getOrDefault("")
+                val crashes = runCatching {
+                    File(dev, "crash_count").readText().trim().toInt()
+                }.getOrDefault(0)
+                state to crashes
+            }
+    }.getOrNull()
 
     /**
      * The hottest SoC sensor, in Celsius.
