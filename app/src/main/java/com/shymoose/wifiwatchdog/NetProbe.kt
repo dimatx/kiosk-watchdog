@@ -15,7 +15,16 @@ data class WifiStatus(
     val ssid: String?,
     val bssid: String?,
     val rssi: Int?,
-    val linkSpeedMbps: Int?
+    val linkSpeedMbps: Int?,
+    /**
+     * What the supplicant is doing.
+     *
+     * The one signal that separates "trying to join and failing" from "not
+     * trying at all", which is the difference between a network the framework
+     * has temporarily given up on and a radio that cannot see the access point.
+     * Nothing else exposed to an app distinguishes those two.
+     */
+    val supplicant: String? = null
 )
 
 /** Where the reachability check is pointed, and why. */
@@ -149,7 +158,8 @@ class NetProbe(private val context: Context) {
             ssid = ssid,
             bssid = info?.bssid?.takeIf { it != "00:00:00:00:00:00" },
             rssi = info?.rssi?.takeIf { it != -127 && ssid != null },
-            linkSpeedMbps = info?.linkSpeed?.takeIf { it > 0 && ssid != null }
+            linkSpeedMbps = info?.linkSpeed?.takeIf { it > 0 && ssid != null },
+            supplicant = info?.supplicantState?.name
         )
     }
 

@@ -46,7 +46,8 @@ object Vitals {
         val rxMb: Long = 0,
         val mv: Int = 0,
         val wlanCrashes: Int = 0,
-        val wlanSubsys: String = ""
+        val wlanSubsys: String = "",
+        val supplicant: String = ""
     ) {
         fun encode(): String = listOf(
             at.toString(),
@@ -64,7 +65,8 @@ object Vitals {
             rxMb.toString(),
             mv.toString(),
             wlanCrashes.toString(),
-            wlanSubsys
+            wlanSubsys,
+            supplicant
         ).joinToString(",")
 
         /** Readable form, for the report sent after a freeze. */
@@ -85,8 +87,15 @@ object Vitals {
                 // relying on it to explain a freeze.
                 append(if (wlanSubsys.isEmpty()) "  wlan ?" else "  wlan ${wlanSubsys.lowercase()}")
             }
+            // Suppressed while healthy, but an unreadable value is shown, so an
+            // empty column cannot be mistaken for a working supplicant.
+            val supp = when {
+                supplicant.isEmpty() -> "  supp ?"
+                supplicant == "COMPLETED" -> ""
+                else -> "  " + supplicant.lowercase()
+            }
             return "$clock  up ${uptimeSec / 60}m  mem ${memAvailMb}MB  load $load1  " +
-                "${tempC}C  $link$radio$ap  rx ${rxMb}MB  ${mv}mV  stage $stage$radioFw"
+                "${tempC}C  $link$radio$ap  rx ${rxMb}MB  ${mv}mV  stage $stage$radioFw$supp"
         }
 
         companion object {
@@ -110,7 +119,8 @@ object Vitals {
                     rxMb = f.getOrNull(12)?.toLongOrNull() ?: 0,
                     mv = f.getOrNull(13)?.toIntOrNull() ?: 0,
                     wlanCrashes = f.getOrNull(14)?.toIntOrNull() ?: 0,
-                    wlanSubsys = f.getOrNull(15).orEmpty()
+                    wlanSubsys = f.getOrNull(15).orEmpty(),
+                    supplicant = f.getOrNull(16).orEmpty()
                 )
             }
         }
@@ -140,7 +150,8 @@ object Vitals {
             rxMb = readRxBytes() / (1024 * 1024),
             mv = readMilliVolts(),
             wlanCrashes = wlan?.second ?: 0,
-            wlanSubsys = wlan?.first.orEmpty()
+            wlanSubsys = wlan?.first.orEmpty(),
+            supplicant = wifi?.supplicant.orEmpty()
         )
         runCatching {
             val file = File(context.filesDir, FILE)
