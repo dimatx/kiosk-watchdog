@@ -3,6 +3,7 @@ package com.shymoose.wifiwatchdog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.PowerManager
 import android.os.SystemClock
 
 /**
@@ -41,6 +42,9 @@ object KioskReturn {
     /** Long enough to let somebody press Home and open something themselves. */
     private const val LAUNCHER_GRACE_MS = 60_000L
 
+    /** Owns the status bar and keyguard, which overlay whatever is really running. */
+    private const val SYSTEM_UI = "com.android.systemui"
+
     @Volatile
     private var awaySince = 0L
 
@@ -75,11 +79,23 @@ object KioskReturn {
         val afterMs = prefs.kioskReturnAfterMin * 60_000L
         if (afterMs <= 0L) return
 
+        // Nothing to correct on a dark screen, and the window in front of one is
+        // the system's, not the app's. Held rather than reset: the wait carries on
+        // while the display sleeps, so walking up to a display that was left on
+        // the wrong screen snaps it back rather than starting the clock again.
+        val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (power?.isInteractive == false) return
+
         val front = InstallAutoClickService.foregroundPackage()
         // A null reading is "not known", not "not the kiosk". The accessibility
         // service may be unbound or between windows, and acting on that would
         // relaunch the kiosk on top of whatever is genuinely showing.
-        if (front == null || front == target) {
+        if (front == null) return
+        // The status bar and keyguard sit in front of whatever is actually
+        // running, so they say nothing about it either way.
+        if (front == SYSTEM_UI) return
+
+        if (front == target) {
             awaySince = 0L
             reportedMissing = false
             return

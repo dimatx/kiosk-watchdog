@@ -60,10 +60,28 @@ jobs:
           # so it cannot drift depending on who or what published the release.
           echo "RELEASE_NAME=Kiosk Watchdog ${TAG#v}" >> "$GITHUB_ENV"
 
+      # The summary comes from the annotated tag, so writing it is part of
+      # tagging rather than a separate step that gets forgotten. A lightweight
+      # tag has no message and simply leaves the generated changelog on its own.
+      - name: Release notes from the tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          BODY=$(git for-each-ref "refs/tags/$TAG" --format='%(contents:body)')
+          if [ -z "$(printf '%s' "$BODY" | tr -d '[:space:]')" ]; then
+            BODY=$(git for-each-ref "refs/tags/$TAG" --format='%(contents:subject)')
+          fi
+          {
+            echo 'RELEASE_BODY<<GH_EOF'
+            printf '%s\n' "$BODY"
+            echo 'GH_EOF'
+          } >> "$GITHUB_ENV"
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: ${{ env.RELEASE_NAME }}
+          body: ${{ env.RELEASE_BODY }}
           files: kiosk-watchdog-*.apk
           generate_release_notes: true
 
