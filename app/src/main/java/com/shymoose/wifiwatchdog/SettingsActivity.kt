@@ -1,6 +1,7 @@
 package com.shymoose.wifiwatchdog
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceScreen
@@ -14,6 +15,11 @@ class SettingsActivity :
         setContentView(R.layout.activity_settings)
         setSupportActionBar(findViewById(R.id.toolbar))
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+
+        // Same reason as MainActivity: while this window is in front the kiosk's own
+        // keep-screen-on no longer applies, and configuring a display should not end
+        // with the panel timing out mid-edit.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.settings_container, SettingsFragment())

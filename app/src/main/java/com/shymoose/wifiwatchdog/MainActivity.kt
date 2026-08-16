@@ -12,6 +12,7 @@ import android.os.Looper
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -45,6 +46,15 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
+
+        // Kiosk Satellite keeps the panel lit with FLAG_KEEP_SCREEN_ON, which only
+        // applies while its window is the focused one. Whenever this activity is in
+        // front that protection lapses and the OS idle timeout turns the display off
+        // — on a wall-mounted kiosk it then stays dark until someone touches it, and
+        // the return-to-kiosk timer is usually longer than the timeout, so the panel
+        // dies before the kiosk comes back. Hold the flag for as long as we are the
+        // one on screen.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         prefs = Prefs(this)
         recovery = WifiRecovery(this)
