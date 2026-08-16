@@ -33,6 +33,13 @@ object BluetoothGuard {
             return
         }
 
+        // Not while the link is being recovered. Switching the adapter off means
+        // touching a chip the Wi-Fi side is mid-association on, and an outage is
+        // the worst moment to introduce another variable. The radio comes back
+        // enabled after an airplane cycle, so this would otherwise fire during
+        // every recovery attempt.
+        if (!WatchdogService.State.online || WatchdogService.State.stage > 0) return
+
         var acted = false
 
         // The scanning setting is the half that survives the UI toggle, and the
