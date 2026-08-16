@@ -2,6 +2,7 @@ package com.shymoose.wifiwatchdog
 
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -353,46 +354,138 @@ object ConfigServer {
         }
     }
 
+    // ---------------------------------------------------------- Writing values
+
+    /**
+     * What became of one attempted write.
+     *
+     * Three routes reach the preferences - the form's Save button, the browser's
+     * autosave on a single field, and a config import - and they differ only in
+     * how they report the outcome. Sharing the outcome lets them share the write.
+     */
+    private sealed class Written {
+        object Applied : Written()
+
+        /** A blank password: the stored secret is deliberately left alone. */
+        object Skipped : Written()
+
+        object Unknown : Written()
+        class Rejected(val reason: String) : Written()
+    }
+
+    /**
+     * Writes one key, whatever it is.
+     *
+     * This used to be open-coded three times, and the copies had drifted: the
+     * import path accepted only "1" and "true" for a checkbox, so importing "yes"
+     * or "on" silently stored false and still reported success. One
+     * implementation means one set of rules.
+     *
+     * String values are written even for numeric fields. Every numeric preference
+     * is stored as a String because the settings screen uses EditTextPreference,
+     * and writing an Int here would make the matching Prefs.getString throw.
+     *
+     * [editor] is not committed here; the caller decides when.
+     */
+    private fun writeField(
+        context: Context,
+        editor: SharedPreferences.Editor,
+        key: String,
+        raw: String
+    ): Written {
+        val value = raw.trim()
+        if (key.isEmpty()) return Written.Unknown
+
+        // Not a preference at all - it lives in the system settings, so it is
+        // written straight through rather than through the editor.
+        if (key == "device_name") {
+            if (value.isEmpty()) return Written.Rejected("Device name cannot be blank.")
+            if (value == DeviceIdentity.hostname(context)) return Written.Skipped
+            val ok = runCatching {
+                Settings.Global.putString(context.contentResolver, "device_name", value)
+            }.getOrDefault(false)
+            return if (ok) Written.Applied
+            else Written.Rejected("Device name needs the WRITE_SECURE_SETTINGS grant.")
+        }
+
+        // The master switch is on the main screen rather than in a section, so it
+        // has no Field entry to look up.
+        if (key == Prefs.KEY_ENABLED) {
+            val on = parseBool(value) ?: return rejectBool(key, value)
+            editor.putBoolean(key, on)
+            return Written.Applied
+        }
+
+        // The companion checkbox that erases a stored secret.
+        if (key.endsWith("_clear")) {
+            val target = key.removeSuffix("_clear")
+            if (FIELDS.none { it.key == target && it.kind == Kind.PASSWORD }) return Written.Unknown
+            val on = parseBool(value) ?: return rejectBool(key, value)
+            if (!on) return Written.Skipped
+            editor.putString(target, "")
+            return Written.Applied
+        }
+
+        val field = FIELDS.firstOrNull { it.key == key } ?: return Written.Unknown
+        return when (field.kind) {
+            Kind.BOOL -> {
+                val on = parseBool(value) ?: return rejectBool(key, value)
+                editor.putBoolean(key, on)
+                Written.Applied
+            }
+
+            Kind.PASSWORD ->
+                if (value.isEmpty()) Written.Skipped
+                else {
+                    editor.putString(key, value)
+                    Written.Applied
+                }
+
+            else -> {
+                editor.putString(key, value)
+                Written.Applied
+            }
+        }
+    }
+
+    /** Null when the value is not recognisable either way, so it can be refused. */
+    private fun parseBool(value: String): Boolean? = when (value.lowercase()) {
+        "1", "true", "on", "yes" -> true
+        "0", "false", "off", "no" -> false
+        else -> null
+    }
+
+    private fun rejectBool(key: String, value: String) =
+        Written.Rejected("Expected a yes or no value for '$key', got '$value'.")
+
     // ---------------------------------------------------------------- Save
 
     private fun save(context: Context, form: Map<String, String>): String {
-        val sp = PreferenceManager.getDefaultSharedPreferences(context)
-        val editor = sp.edit()
+        val editor = PreferenceManager.getDefaultSharedPreferences(context).edit()
+        var note = ""
+
+        fun write(key: String, value: String) {
+            (writeField(context, editor, key, value) as? Written.Rejected)?.let { note = " " + it.reason }
+        }
 
         for (field in FIELDS) {
             when (field.kind) {
-                Kind.BOOL ->
-                    // An unchecked box is simply absent from the body, and the form
-                    // always renders every field, so absence means false.
-                    editor.putBoolean(field.key, form.containsKey(field.key))
+                // An unchecked box is simply absent from the body, and the form
+                // always renders every field, so absence means false.
+                Kind.BOOL -> write(field.key, if (form.containsKey(field.key)) "1" else "0")
 
-                Kind.PASSWORD -> {
-                    val value = form[field.key].orEmpty()
-                    when {
-                        form.containsKey(field.key + "_clear") -> editor.putString(field.key, "")
-                        value.isNotEmpty() -> editor.putString(field.key, value)
-                        // Blank means "leave the stored secret alone".
-                    }
-                }
+                Kind.PASSWORD ->
+                    if (form.containsKey(field.key + "_clear")) write(field.key + "_clear", "1")
+                    else write(field.key, form[field.key].orEmpty())
 
-                else -> form[field.key]?.let { editor.putString(field.key, it.trim()) }
+                else -> form[field.key]?.let { write(field.key, it) }
             }
         }
-        // The master switch lives on the main screen rather than in the field list,
-        // but the form always renders it, so absence means unchecked.
+
         val enabled = form.containsKey(Prefs.KEY_ENABLED)
-        editor.putBoolean(Prefs.KEY_ENABLED, enabled)
+        write(Prefs.KEY_ENABLED, if (enabled) "1" else "0")
+        form["device_name"]?.let { write("device_name", it) }
         editor.apply()
-
-        var note = ""
-        form["device_name"]?.trim()?.let { name ->
-            if (name.isNotEmpty() && name != DeviceIdentity.hostname(context)) {
-                val ok = runCatching {
-                    Settings.Global.putString(context.contentResolver, "device_name", name)
-                }.getOrDefault(false)
-                if (!ok) note = " Device name needs the WRITE_SECURE_SETTINGS grant."
-            }
-        }
 
         // Intervals and thresholds are read once at schedule time, so the service has
         // to be rebuilt for anything here to take effect.
@@ -409,57 +502,17 @@ object ConfigServer {
      * while someone tabs through a form.
      */
     private fun field(context: Context, key: String, raw: String): String {
-        if (key.isEmpty()) return "Unknown field."
-        val sp = PreferenceManager.getDefaultSharedPreferences(context)
-        val value = raw.trim()
-
-        when {
-            key == "device_name" -> {
-                if (value.isEmpty()) return "Device name cannot be blank."
-                val ok = runCatching {
-                    Settings.Global.putString(context.contentResolver, "device_name", value)
-                }.getOrDefault(false)
-                return if (ok) "Saved" else "Needs the WRITE_SECURE_SETTINGS grant."
-            }
-
-            key == Prefs.KEY_ENABLED -> sp.edit().putBoolean(key, value == "1").apply()
-
-            key.endsWith("_clear") -> {
-                val target = key.removeSuffix("_clear")
-                if (FIELDS.none { it.key == target && it.kind == Kind.PASSWORD }) {
-                    return "Unknown field."
-                }
-                if (value == "1") sp.edit().putString(target, "").apply()
-            }
-
+        val editor = PreferenceManager.getDefaultSharedPreferences(context).edit()
+        val result = writeField(context, editor, key, raw)
+        return when (result) {
+            is Written.Rejected -> result.reason
+            Written.Unknown -> "Unknown field."
             else -> {
-                val field = FIELDS.firstOrNull { it.key == key } ?: return "Unknown field."
-                when (field.kind) {
-                    // Only "1" used to count as true, so a scripted call sending
-                    // "true" stored false and still answered "Saved". The browser
-                    // form posts "1", so this only ever bit automation - silently,
-                    // which is the worst way for it to bite.
-                    Kind.BOOL -> {
-                        val on = when (value.lowercase()) {
-                            "1", "true", "on", "yes" -> true
-                            "0", "false", "off", "no" -> false
-                            else -> return "Expected a yes or no value for '$key', got '$value'."
-                        }
-                        sp.edit().putBoolean(key, on).apply()
-                    }
-                    // Blank means "leave the stored secret alone"; the clear checkbox
-                    // is the only way to erase it.
-                    Kind.PASSWORD -> if (value.isNotEmpty()) sp.edit().putString(key, value).apply()
-                    // Every numeric preference is stored as a String because the
-                    // settings screen uses EditTextPreference. Writing an Int here
-                    // would make Prefs.getString throw.
-                    else -> sp.edit().putString(key, value).apply()
-                }
+                editor.apply()
+                scheduleRebuild(context)
+                "Saved"
             }
         }
-
-        scheduleRebuild(context)
-        return "Saved"
     }
 
     private val rebuild = Handler(Looper.getMainLooper())
@@ -526,42 +579,15 @@ object ConfigServer {
         var note = ""
 
         for (key in json.keys()) {
+            // Reserved for the export's own metadata.
             if (key.startsWith("_")) continue
-            val value = json.opt(key)?.toString().orEmpty().trim()
-            when {
-                key == "device_name" -> {
-                    if (value.isEmpty()) continue
-                    val ok = runCatching {
-                        Settings.Global.putString(context.contentResolver, "device_name", value)
-                    }.getOrDefault(false)
-                    if (ok) applied++ else note = " Device name needs the WRITE_SECURE_SETTINGS grant."
-                }
-
-                key == Prefs.KEY_ENABLED -> {
-                    editor.putBoolean(key, truthy(value))
-                    applied++
-                }
-
-                else -> {
-                    val field = FIELDS.firstOrNull { it.key == key }
-                    when {
-                        field == null -> unknown++
-                        field.kind == Kind.BOOL -> {
-                            editor.putBoolean(key, truthy(value))
-                            applied++
-                        }
-                        // Blank means "keep what is stored", matching the form.
-                        field.kind == Kind.PASSWORD -> if (value.isNotEmpty()) {
-                            editor.putString(key, value)
-                            applied++
-                        }
-
-                        else -> {
-                            editor.putString(key, value)
-                            applied++
-                        }
-                    }
-                }
+            val value = json.opt(key)?.toString().orEmpty()
+            when (val result = writeField(context, editor, key, value)) {
+                Written.Applied -> applied++
+                Written.Unknown -> unknown++
+                // A blank password, or a device name already set to this value.
+                Written.Skipped -> Unit
+                is Written.Rejected -> note = " " + result.reason
             }
         }
 
@@ -573,9 +599,6 @@ object ConfigServer {
     }
 
     private fun plural(count: Int): String = if (count == 1) "" else "s"
-
-    private fun truthy(value: String): Boolean =
-        value == "1" || value.equals("true", ignoreCase = true)
 
     // ---------------------------------------------------------------- View
 

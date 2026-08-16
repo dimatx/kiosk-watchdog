@@ -56,10 +56,14 @@ jobs:
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           cp app/build/outputs/apk/release/app-release.apk "kiosk-watchdog-$TAG.apk"
+          # The release title is set here rather than left to default to the tag,
+          # so it cannot drift depending on who or what published the release.
+          echo "RELEASE_NAME=Kiosk Watchdog ${TAG#v}" >> "$GITHUB_ENV"
 
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ env.RELEASE_NAME }}
           files: kiosk-watchdog-*.apk
           generate_release_notes: true
 

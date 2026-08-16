@@ -128,7 +128,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             val handler = Handler(Looper.getMainLooper())
             // enable() waits for the framework to bind, so it cannot run here.
             Thread {
-                val result = InstallAutoClickService.enable(context)
+                val result = AccessibilityBinding.enable(context)
                 handler.post {
                     val message = when (result) {
                         SetupResult.ALREADY_ON -> R.string.toast_auto_install_already
@@ -139,7 +139,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                         // because that screen gives no hint about what sent the
                         // user there.
                         SetupResult.NEEDS_MANUAL ->
-                            if (InstallAutoClickService.openAccessibilitySettings(context)) {
+                            if (AccessibilityBinding.openAccessibilitySettings(context)) {
                                 R.string.toast_auto_install_manual
                             } else {
                                 R.string.toast_auto_install_failed
