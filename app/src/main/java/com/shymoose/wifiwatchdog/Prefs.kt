@@ -62,6 +62,24 @@ class Prefs(context: Context) {
         set(value) = sp.edit().putBoolean(KEY_AIRPLANE_PENDING, value).commit().let { }
 
     /**
+     * The value `wifi_scan_always_enabled` must be put back to, or -1 when no
+     * reset is in flight.
+     *
+     * A hard reset turns that setting off to force a real driver teardown and
+     * turns it back on afterwards. Reading the "previous" value live at the start
+     * of each reset looked safe and was not: if the process dies mid-reset - which
+     * is entirely plausible, since the radio is being torn down at the time - the
+     * next reset reads the value this app left behind and faithfully restores
+     * zero, permanently. Four of five displays were found stuck that way.
+     *
+     * Committed, for the same reason: a value that only exists in memory is worth
+     * nothing to the run that has to clean up after a kill.
+     */
+    var scanAlwaysRestore: Int
+        get() = sp.getInt(KEY_SCAN_ALWAYS_RESTORE, -1)
+        set(value) = sp.edit().putInt(KEY_SCAN_ALWAYS_RESTORE, value).commit().let { }
+
+    /**
      * When the watchdog was last known to be running, written on every check.
      *
      * Committed rather than applied: the whole point is to survive a device that
@@ -215,6 +233,7 @@ class Prefs(context: Context) {
         private const val KEY_HEARTBEAT_LAST = "heartbeat_last_at"
         private const val KEY_LAST_GOOD = "last_good_at"
         private const val KEY_AIRPLANE_PENDING = "airplane_pending"
+        private const val KEY_SCAN_ALWAYS_RESTORE = "scan_always_restore"
         private const val KEY_LAST_ALIVE = "last_alive_at"
         private const val KEY_CLEAN_SHUTDOWN = "clean_shutdown"
         private const val KEY_AUTO_INSTALL_EVER_ON = "auto_install_service_ever_on"

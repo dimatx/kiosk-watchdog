@@ -140,6 +140,7 @@
     <string name="ntfy_line_down_since">Down: %1$s so far</string>
     <string name="ntfy_line_stage">Stage: %1$d</string>
     <string name="ntfy_line_target">Probe target: %1$s</string>
+    <string name="ntfy_line_blind">Radio can see no access points — escalated early</string>
     <string name="log_ntfy_test">Test notification queued</string>
     <string name="log_ntfy_unconfigured">Set an ntfy topic first</string>
     <string name="toast_ntfy_test">Test queued — check the event log</string>

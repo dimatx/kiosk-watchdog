@@ -49,7 +49,8 @@ object Vitals {
         val wlanCrashes: Int = 0,
         val wlanSubsys: String = "",
         val supplicant: String = "",
-        val dataFreeMb: Int = -1
+        val dataFreeMb: Int = -1,
+        val scanCount: Int = -1
     ) {
         fun encode(): String = listOf(
             at.toString(),
@@ -69,7 +70,8 @@ object Vitals {
             wlanCrashes.toString(),
             wlanSubsys,
             supplicant,
-            dataFreeMb.toString()
+            dataFreeMb.toString(),
+            scanCount.toString()
         ).joinToString(",")
 
         /** Readable form, for the report sent after a freeze. */
@@ -104,8 +106,15 @@ object Vitals {
                 dataFreeMb < LOW_DISK_MB -> "  disk ${dataFreeMb}MB"
                 else -> ""
             }
+            // The count of visible access points. Printed whenever it is not a
+            // healthy positive number, since zero is the whole point of having it.
+            val seen = when {
+                scanCount > 0 -> "  aps $scanCount"
+                scanCount == 0 -> "  APS NONE"
+                else -> "  aps ?"
+            }
             return "$clock  up ${uptimeSec / 60}m  mem ${memAvailMb}MB  load $load1  " +
-                "${tempC}C  $link$radio$ap  rx ${rxMb}MB  ${mv}mV  stage $stage$radioFw$supp$disk"
+                "${tempC}C  $link$radio$ap  rx ${rxMb}MB  ${mv}mV  stage $stage$radioFw$supp$seen$disk"
         }
 
         companion object {
@@ -134,7 +143,8 @@ object Vitals {
                     wlanCrashes = f.getOrNull(14)?.toIntOrNull() ?: 0,
                     wlanSubsys = f.getOrNull(15).orEmpty(),
                     supplicant = f.getOrNull(16).orEmpty(),
-                    dataFreeMb = f.getOrNull(17)?.toIntOrNull() ?: -1
+                    dataFreeMb = f.getOrNull(17)?.toIntOrNull() ?: -1,
+                    scanCount = f.getOrNull(18)?.toIntOrNull() ?: -1
                 )
             }
         }
@@ -166,7 +176,8 @@ object Vitals {
             wlanCrashes = wlan?.second ?: 0,
             wlanSubsys = wlan?.first.orEmpty(),
             supplicant = wifi?.supplicant.orEmpty(),
-            dataFreeMb = readDataFreeMb()
+            dataFreeMb = readDataFreeMb(),
+            scanCount = wifi?.scanCount ?: -1
         )
         runCatching {
             val file = File(context.filesDir, FILE)

@@ -34,6 +34,9 @@ class WatchdogService : Service() {
     /** Last probe target, quoted in notifications raised from the escalation ladder. */
     private var lastTargetLabel: String = "?"
 
+    /** Rate limit for asking the radio to scan while the link is healthy. */
+    private var lastScanRequestAt: Long = 0L
+
     /** What the ongoing notification currently says, so identical updates are dropped. */
     private var lastNotifiedSummary: String? = null
     private var lastNotifiedDetail: String? = null
@@ -43,6 +46,10 @@ class WatchdogService : Service() {
         prefs = Prefs(this)
         probe = NetProbe(this)
         recovery = WifiRecovery(this)
+        // Before anything else: an interrupted reset can leave background
+        // scanning switched off, which is both a degradation in its own right and
+        // the reason the radio cannot be seen to be working.
+        worker.execute { runCatching { recovery.restoreScanAlways() } }
         createChannel()
         acquireWifiLock()
     }
@@ -141,7 +148,7 @@ class WatchdogService : Service() {
         prefs.lastAliveAtMillis = now
         if (prefs.cleanShutdown) prefs.cleanShutdown = false
 
-        InstallAutoClickService.repairIfUnbound(this)
+        AccessibilityBinding.repairIfUnbound(this)
         BluetoothGuard.enforce(this)
         KioskReturn.check(this)
         // An install dialog can appear while the display is asleep, where nothing
@@ -158,6 +165,8 @@ class WatchdogService : Service() {
         State.online = reachable
         val label = describeTarget(this, target)
         lastTargetLabel = label
+
+        updateBlindness(reachable, now)
 
         // Recorded before any recovery runs, so the picture is of the device as
         // it was found rather than after the ladder started acting on it.
@@ -183,7 +192,6 @@ class WatchdogService : Service() {
             State.detail = getString(R.string.status_detail_online, label)
             return
         }
-
         State.consecutiveFailures++
         val downSec = (now - prefs.lastGoodAtMillis) / 1000
         State.summary = getString(R.string.status_offline)
@@ -197,28 +205,90 @@ class WatchdogService : Service() {
         escalate(downSec, now)
     }
 
+    /**
+     * Tracks whether the radio can see anything at all.
+     *
+     * A fresh scan is asked for on every failed check so the reading is live
+     * rather than a cache of whatever was last seen; a stale cache would hide
+     * precisely the failure this is looking for.
+     */
+    private fun updateBlindness(reachable: Boolean, now: Long) {
+        val wifi = State.wifi
+        if (wifi != null && wifi.scanCount > 0) State.everSawAccessPoints = true
+
+        val settling = now - State.lastActionAt < ACTION_SETTLE_MS
+
+        if (reachable || wifi == null || !wifi.wifiEnabled || settling) {
+            State.blindChecks = 0
+            // Kept warm while healthy, at a fraction of the check rate. Without
+            // this the scan list on a connected display can stay empty for hours
+            // simply because nothing asked, and an empty list that has never once
+            // been non-empty is not usable as evidence of anything.
+            if (reachable && now - lastScanRequestAt >= SCAN_REFRESH_MS) {
+                lastScanRequestAt = now
+                probe.requestScan()
+            }
+            return
+        }
+
+        // Down: ask on every check. The results land in time for the next one.
+        lastScanRequestAt = now
+        probe.requestScan()
+
+        // -1 is "could not read", which is not evidence of anything.
+        if (wifi.scanCount != 0) {
+            State.blindChecks = 0
+            return
+        }
+
+        State.blindChecks++
+        if (State.blindChecks == BLIND_CONFIRM_CHECKS && State.everSawAccessPoints) {
+            EventLog.add(
+                this,
+                EventLevel.WARN,
+                "Radio can see no access points at all — treating this as a failed radio"
+            )
+        }
+    }
+
     private fun escalate(downSec: Long, now: Long) {
+        // A radio that can see nothing is not going to be talked round by asking
+        // it to re-associate with an access point it cannot find. The cheap rungs
+        // are there for a link that is merely unhappy; this one is broken, so it
+        // goes straight to the rung that reloads the driver.
+        if (State.blind && State.stage < 2) {
+            EventLog.add(this, EventLevel.INFO, "Skipping the gentler steps — nothing to re-associate with")
+            State.stage = 2
+        }
+
+        // The configured delays exist to avoid over-reacting to a link that might
+        // still come back on its own. A blind radio is not going to, so the wait
+        // is dropped - but only for the rungs that actually reload the driver.
+        // Blindness is re-confirmed after every action, so this cannot run two
+        // resets back to back: the settle window clears the count first.
+        val blind = State.blind
+
         when (State.stage) {
             0 -> if (downSec >= prefs.reassociateAfterSec) {
-                recovery.reassociate()
+                act { recovery.reassociate() }
                 State.stage = 1
             }
 
             1 -> if (downSec >= prefs.softToggleAfterSec) {
-                recovery.softToggle()
+                act { recovery.softToggle() }
                 State.stage = 2
             }
 
-            2 -> if (downSec >= prefs.hardResetAfterSec) {
-                if (hardResetUsable()) recovery.hardReset() else recovery.softToggle()
+            2 -> if (blind || downSec >= prefs.hardResetAfterSec) {
+                act { if (hardResetUsable()) recovery.hardReset() else recovery.softToggle() }
                 State.stage = 3
                 report("hard_reset", downSec)
             }
 
-            3 -> if (downSec >= prefs.airplaneAfterSec) {
+            3 -> if (blind || downSec >= prefs.airplaneAfterSec) {
                 // The heaviest rung: a real airplane-mode cycle, which is what has
                 // actually brought this device back when nothing else did.
-                if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset()
+                act { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
                 State.stage = 4
                 State.backoffSec = INITIAL_BACKOFF_SEC
                 State.nextHardResetAt = now + State.backoffSec * 1000L
@@ -226,8 +296,9 @@ class WatchdogService : Service() {
             }
 
             else -> if (now >= State.nextHardResetAt) {
-                if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset()
-                State.backoffSec = (State.backoffSec * 2).coerceAtMost(MAX_BACKOFF_SEC)
+                act { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
+                val ceiling = if (blind) BLIND_MAX_BACKOFF_SEC else MAX_BACKOFF_SEC
+                State.backoffSec = (State.backoffSec * 2).coerceAtMost(ceiling)
                 State.nextHardResetAt = now + State.backoffSec * 1000L
                 EventLog.add(
                     this,
@@ -236,6 +307,22 @@ class WatchdogService : Service() {
                 )
                 report("airplane_cycle", downSec)
             }
+        }
+    }
+
+    /**
+     * Runs a recovery action and notes when it finished.
+     *
+     * The timestamp is what stops the radio's own recovery being read as another
+     * failure: the scan list is empty for a while after a reload, and without a
+     * settle window that would escalate straight into the next rung.
+     */
+    private inline fun act(block: () -> Unit) {
+        try {
+            block()
+        } finally {
+            State.lastActionAt = System.currentTimeMillis()
+            State.blindChecks = 0
         }
     }
 
@@ -316,6 +403,9 @@ class WatchdogService : Service() {
         if (event != "test") {
             lines.add(getString(R.string.ntfy_line_stage, State.stage))
             lines.add(getString(R.string.ntfy_line_target, lastTargetLabel))
+            // Says why the ladder is where it is: without this an accelerated
+            // escalation looks like the delays were ignored.
+            if (State.blind) lines.add(getString(R.string.ntfy_line_blind))
         }
 
         Ntfy.enqueue(
@@ -433,6 +523,40 @@ class WatchdogService : Service() {
         var wifi: WifiStatus? = null
         var summary: String = "Watchdog"
         var detail: String = "Starting…"
+
+        /**
+         * Whether this device has ever reported seeing an access point.
+         *
+         * Scan results are not readable everywhere: they need a location
+         * permission and the location providers switched on, and when either is
+         * missing the call returns an empty list rather than an error - which is
+         * indistinguishable from a radio that genuinely sees nothing. Measured on
+         * these displays, a perfectly healthy one reported zero.
+         *
+         * So a zero only counts once a positive reading has been seen at least
+         * once. On a device where the reading is unavailable the signal is simply
+         * never used, instead of declaring every healthy radio broken.
+         */
+        var everSawAccessPoints: Boolean = false
+
+        /**
+         * Consecutive checks on which the radio was enabled but could see no
+         * access points at all. See [blind].
+         */
+        var blindChecks: Int = 0
+
+        /** When the last recovery action ran, so its own aftermath is not counted. */
+        var lastActionAt: Long = 0L
+
+        /**
+         * Whether the radio is confirmed blind: enabled, but seeing nothing.
+         *
+         * These displays are permanently in range of several access points, so an
+         * empty scan list is not a state a working radio reaches. Confirmed over
+         * consecutive checks rather than acted on immediately, because a scan
+         * legitimately returns nothing for a few seconds after the driver reloads.
+         */
+        val blind: Boolean get() = everSawAccessPoints && blindChecks >= BLIND_CONFIRM_CHECKS
     }
 
     companion object {
@@ -450,6 +574,37 @@ class WatchdogService : Service() {
         private const val WAKE_TIMEOUT_LONG_MS = 10 * 60_000L
         private const val INITIAL_BACKOFF_SEC = 300
         private const val MAX_BACKOFF_SEC = 1800
+
+        /**
+         * Checks a radio must see nothing on before it is believed to be blind.
+         *
+         * A reload leaves the scan list empty for a few seconds, so one reading is
+         * not enough; two consecutive ones at the default interval is about forty
+         * seconds of seeing no access point anywhere.
+         */
+        private const val BLIND_CONFIRM_CHECKS = 2
+
+        /**
+         * How long after a recovery action to ignore an empty scan list.
+         *
+         * The radio has just been torn down and has not finished its first scan,
+         * so counting that would have every reset immediately declare itself a
+         * failure and escalate again.
+         */
+        private const val ACTION_SETTLE_MS = 45_000L
+
+        /** How often to refresh the scan list while the link is healthy. */
+        private const val SCAN_REFRESH_MS = 5 * 60_000L
+
+        /**
+         * Backoff ceiling while the radio is blind.
+         *
+         * The normal ceiling assumes the far end may be at fault and there is no
+         * point hammering it. A blind radio is different: the device itself is
+         * known to be broken, and there is no reason to leave it broken for half
+         * an hour between attempts.
+         */
+        private const val BLIND_MAX_BACKOFF_SEC = 300
 
         fun start(context: Context) {
             val intent = Intent(context, WatchdogService::class.java)

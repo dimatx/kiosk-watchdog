@@ -24,7 +24,20 @@ data class WifiStatus(
      * has temporarily given up on and a radio that cannot see the access point.
      * Nothing else exposed to an app distinguishes those two.
      */
-    val supplicant: String? = null
+    val supplicant: String? = null,
+
+    /**
+     * How many access points the radio can currently see, or -1 when that cannot
+     * be read.
+     *
+     * Zero is the strongest evidence available that the radio itself has failed
+     * rather than the network. These displays sit permanently within range of
+     * several access points, so an empty scan list while Wi-Fi is enabled is not
+     * something a healthy radio produces - and it has been seen on a display
+     * whose Wi-Fi picker showed no networks at all while everything around it was
+     * still connected.
+     */
+    val scanCount: Int = -1
 )
 
 /** Where the reachability check is pointed, and why. */
@@ -159,9 +172,31 @@ class NetProbe(private val context: Context) {
             bssid = info?.bssid?.takeIf { it != "00:00:00:00:00:00" },
             rssi = info?.rssi?.takeIf { it != -127 && ssid != null },
             linkSpeedMbps = info?.linkSpeed?.takeIf { it > 0 && ssid != null },
-            supplicant = info?.supplicantState?.name
+            supplicant = info?.supplicantState?.name,
+            scanCount = if (enabled) scanCount() else -1
         )
     }
+
+    /**
+     * The size of the radio's current scan list, or -1 when it cannot be read.
+     *
+     * Needs a location permission and the location providers switched on, which
+     * this app has; a refusal comes back as an exception and is reported as
+     * unknown rather than as zero, so a permission problem can never be mistaken
+     * for a blind radio.
+     */
+    private fun scanCount(): Int = runCatching { wifi.scanResults?.size ?: -1 }.getOrDefault(-1)
+
+    /**
+     * Asks for a fresh scan.
+     *
+     * The list is otherwise a cache of the last successful scan, and a stale
+     * cache would mask exactly the failure being looked for. Android 8.1 does not
+     * throttle this - the four-per-two-minutes limit arrived in Android 9 - so it
+     * can be asked for on every check while the link is down.
+     */
+    fun requestScan(): Boolean =
+        runCatching { wifi.isWifiEnabled && wifi.startScan() }.getOrDefault(false)
 
     companion object {
         private const val PING = "/system/bin/ping"

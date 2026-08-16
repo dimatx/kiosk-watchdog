@@ -82,14 +82,25 @@ class WifiRecovery(private val context: Context) {
         }
 
         val resolver = appContext.contentResolver
-        val previousScanAlways = Settings.Global.getInt(resolver, SCAN_ALWAYS, 1)
+        val prefs = Prefs(appContext)
+
+        // Never read the live value as the restore target. This app sets it to
+        // zero for the duration of the reset, so a reset that follows an
+        // interrupted one would read its own leftover and make it permanent.
+        // The remembered value survives a kill; with nothing remembered, the
+        // platform default is the right answer - a wall display has no reason to
+        // have background scanning switched off by hand.
+        val restoreTo = prefs.scanAlwaysRestore.takeIf { it >= 0 }
+            ?: Settings.Global.getInt(resolver, SCAN_ALWAYS, 1).takeIf { it == 1 }
+            ?: 1
 
         return try {
             EventLog.add(
                 appContext,
                 EventLevel.ACTION,
-                "Hard reset: unloading Wi-Fi driver (scan_always $previousScanAlways -> 0)"
+                "Hard reset: unloading Wi-Fi driver (scan_always -> 0, will restore $restoreTo)"
             )
+            prefs.scanAlwaysRestore = restoreTo
             Settings.Global.putInt(resolver, SCAN_ALWAYS, 0)
             Thread.sleep(SETTLE_MS)
 
@@ -97,7 +108,7 @@ class WifiRecovery(private val context: Context) {
             Thread.sleep(HARD_OFF_MS)
 
             // Restore before re-enabling so the radio comes back in its normal mode.
-            Settings.Global.putInt(resolver, SCAN_ALWAYS, previousScanAlways)
+            Settings.Global.putInt(resolver, SCAN_ALWAYS, restoreTo)
             Thread.sleep(SETTLE_MS)
 
             val ok = wifi.setWifiEnabled(true)
@@ -112,8 +123,48 @@ class WifiRecovery(private val context: Context) {
             false
         } finally {
             // Belt and braces: never leave scan-always turned off.
-            runCatching { Settings.Global.putInt(resolver, SCAN_ALWAYS, previousScanAlways) }
+            runCatching { Settings.Global.putInt(resolver, SCAN_ALWAYS, restoreTo) }
+            prefs.scanAlwaysRestore = -1
         }
+    }
+
+    /**
+     * Puts `wifi_scan_always_enabled` back if a reset was interrupted before it
+     * could, and repairs a display that an earlier version already left switched
+     * off.
+     *
+     * Called on start rather than only after a reset, because the run that has to
+     * clean up is by definition not the run that broke it.
+     */
+    fun restoreScanAlways() {
+        val resolver = appContext.contentResolver
+        val prefs = Prefs(appContext)
+        val pending = prefs.scanAlwaysRestore
+        val current = runCatching { Settings.Global.getInt(resolver, SCAN_ALWAYS, 1) }.getOrNull() ?: return
+
+        val wanted = when {
+            // A reset did not finish. Its remembered target is authoritative.
+            pending >= 0 -> pending
+            // Nothing in flight and the setting is off. Earlier builds read the
+            // restore value live and could make their own zero permanent, so this
+            // heals a display that was left that way.
+            current == 0 -> 1
+            else -> return
+        }
+        if (current == wanted) {
+            if (pending >= 0) prefs.scanAlwaysRestore = -1
+            return
+        }
+        if (!hasSecureSettingsPermission()) return
+
+        val ok = runCatching { Settings.Global.putInt(resolver, SCAN_ALWAYS, wanted) }.isSuccess
+        prefs.scanAlwaysRestore = -1
+        EventLog.add(
+            appContext,
+            if (ok) EventLevel.ACTION else EventLevel.ERROR,
+            if (ok) "Background Wi-Fi scanning was left switched off — turned it back on"
+            else "Could not turn background Wi-Fi scanning back on"
+        )
     }
 
     /**
