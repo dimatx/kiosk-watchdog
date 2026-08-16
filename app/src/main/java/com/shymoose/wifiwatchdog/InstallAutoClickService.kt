@@ -58,7 +58,20 @@ open class InstallAutoClickService : AccessibilityService() {
      * Guards against clicking the same screen repeatedly while the installer
      * emits a burst of content-changed events.
      */
+    @Volatile
     private var lastClickAt = 0L
+
+    /** Everything that touches the node tree runs here, so nothing races. */
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * Consecutive wakes for a dialog that has not gone away.
+     *
+     * Some installer screens cannot be actioned at all - Play Protect's warning,
+     * or the unknown-sources refusal - and without a cap the display would be
+     * lit again on every check for as long as one of them is showing.
+     */
+    private var wakesForThisDialog = 0
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -91,9 +104,22 @@ open class InstallAutoClickService : AccessibilityService() {
      * Doze, so polling from there catches it.
      */
     fun sweepNow() {
+        // Hopped onto the main thread on purpose. The watchdog calls this from
+        // its own worker while accessibility events arrive on the main thread,
+        // and both end up in handle(). Two threads clicking the same dialog can
+        // confirm it twice, or click OPEN and DONE, so all node work is
+        // serialised here rather than guarded piecemeal.
+        main.post { sweepOnMain() }
+    }
+
+    private fun sweepOnMain() {
         val root = rootInActiveWindow ?: return
         try {
-            if (root.packageName?.toString()?.let { isInstaller(this, it) } != true) return
+            if (root.packageName?.toString()?.let { isInstaller(this, it) } != true) {
+                // The dialog is gone, so a later one starts with a fresh budget.
+                wakesForThisDialog = 0
+                return
+            }
             wakeScreen()
             handle(root)
         } catch (t: Throwable) {
@@ -111,10 +137,19 @@ open class InstallAutoClickService : AccessibilityService() {
      * being live, and a display that is asleep has been observed sitting on the
      * confirm dialog indefinitely. Held briefly and released; the normal screen
      * timeout takes it from there.
+     *
+     * Capped, because some installer screens cannot be actioned at all - Play
+     * Protect's warning, or the refusal shown when installing from this source
+     * is not permitted. Without a limit those would relight the display on every
+     * check for as long as they are showing, which on a wall-mounted panel means
+     * indefinitely.
      */
     private fun wakeScreen() {
         val power = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
         if (power.isInteractive) return
+        if (wakesForThisDialog >= MAX_WAKES_PER_DIALOG) return
+
+        wakesForThisDialog++
         runCatching {
             @Suppress("DEPRECATION")
             val lock = power.newWakeLock(
@@ -122,7 +157,15 @@ open class InstallAutoClickService : AccessibilityService() {
                 "KioskWatchdog::install"
             )
             lock.acquire(SCREEN_WAKE_MS)
-            EventLog.add(this, EventLevel.INFO, "Woke the display for an install dialog")
+            if (wakesForThisDialog == MAX_WAKES_PER_DIALOG) {
+                EventLog.add(
+                    this,
+                    EventLevel.WARN,
+                    "An install dialog is not clearing — leaving the display alone now"
+                )
+            } else {
+                EventLog.add(this, EventLevel.INFO, "Woke the display for an install dialog")
+            }
         }
     }
 
@@ -410,6 +453,9 @@ open class InstallAutoClickService : AccessibilityService() {
 
         /** Long enough for the installer to advance; the screen timeout resumes after. */
         private const val SCREEN_WAKE_MS = 30_000L
+
+        /** Wakes allowed for one dialog before concluding it will not clear. */
+        private const val MAX_WAKES_PER_DIALOG = 3
 
         /** Floor between rebind attempts, so a refusal cannot become a log stream. */
         private const val REPAIR_MIN_INTERVAL_MS = 5 * 60_000L

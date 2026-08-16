@@ -116,8 +116,13 @@ class MainActivity : AppCompatActivity() {
         handler.post(ticker)
     }
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        menuInflater.inflate(R.menu.main, menu)
+    /** Keeps the return-to-kiosk timer from firing while someone is using this. */
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        KioskReturn.noteInteraction()
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {        menuInflater.inflate(R.menu.main, menu)
         return true
     }
 

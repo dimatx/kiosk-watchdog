@@ -105,7 +105,7 @@
     <string name="pref_kiosk_package">Kiosk app</string>
     <string name="pref_kiosk_package_summary">Package name to put back in front. Ignored if it is not installed; leave blank to never do this.</string>
     <string name="pref_kiosk_return">Return after (minutes)</string>
-    <string name="pref_kiosk_return_summary">How long this app may sit in front before the kiosk is restored. Updating this app leaves the installer offering OPEN, which relaunches the watchdog rather than the kiosk, and the display then stays there.</string>
+    <string name="pref_kiosk_return_summary">How long this app may sit in front before the kiosk is restored. If the display drops to the launcher instead — because the kiosk crashed or was stopped — the kiosk is brought back after a minute. Any other app is left alone.</string>
     <string name="pref_keep_bt_off_summary">Wi-Fi and Bluetooth share one chip here, so scanning competes with the link. Turning Bluetooth off in the system UI does not stop the scanning; this does, and re-applies it, because Play Services switches the adapter back on by itself. Leave off if this display uses Bluetooth.</string>
 
     <!-- Top-level settings menu. Each opens a screen; the summary says what lives there. -->

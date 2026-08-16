@@ -1,6 +1,7 @@
 package com.shymoose.wifiwatchdog
 
 import android.content.Context
+import android.os.Environment
 import java.io.File
 import java.io.FileOutputStream
 
@@ -47,7 +48,8 @@ object Vitals {
         val mv: Int = 0,
         val wlanCrashes: Int = 0,
         val wlanSubsys: String = "",
-        val supplicant: String = ""
+        val supplicant: String = "",
+        val dataFreeMb: Int = -1
     ) {
         fun encode(): String = listOf(
             at.toString(),
@@ -66,7 +68,8 @@ object Vitals {
             mv.toString(),
             wlanCrashes.toString(),
             wlanSubsys,
-            supplicant
+            supplicant,
+            dataFreeMb.toString()
         ).joinToString(",")
 
         /** Readable form, for the report sent after a freeze. */
@@ -94,11 +97,21 @@ object Vitals {
                 supplicant == "COMPLETED" -> ""
                 else -> "  " + supplicant.lowercase()
             }
+            // Slow-moving, so only worth the width when it is a problem, or when
+            // it could not be read and so cannot be relied on.
+            val disk = when {
+                dataFreeMb < 0 -> "  disk ?"
+                dataFreeMb < LOW_DISK_MB -> "  disk ${dataFreeMb}MB"
+                else -> ""
+            }
             return "$clock  up ${uptimeSec / 60}m  mem ${memAvailMb}MB  load $load1  " +
-                "${tempC}C  $link$radio$ap  rx ${rxMb}MB  ${mv}mV  stage $stage$radioFw$supp"
+                "${tempC}C  $link$radio$ap  rx ${rxMb}MB  ${mv}mV  stage $stage$radioFw$supp$disk"
         }
 
         companion object {
+            /** Below this, storage is worth mentioning on every sample. */
+            private const val LOW_DISK_MB = 512
+
             fun decode(line: String): Sample? {
                 val f = line.split(',')
                 if (f.size < 9) return null
@@ -120,7 +133,8 @@ object Vitals {
                     mv = f.getOrNull(13)?.toIntOrNull() ?: 0,
                     wlanCrashes = f.getOrNull(14)?.toIntOrNull() ?: 0,
                     wlanSubsys = f.getOrNull(15).orEmpty(),
-                    supplicant = f.getOrNull(16).orEmpty()
+                    supplicant = f.getOrNull(16).orEmpty(),
+                    dataFreeMb = f.getOrNull(17)?.toIntOrNull() ?: -1
                 )
             }
         }
@@ -151,7 +165,8 @@ object Vitals {
             mv = readMilliVolts(),
             wlanCrashes = wlan?.second ?: 0,
             wlanSubsys = wlan?.first.orEmpty(),
-            supplicant = wifi?.supplicant.orEmpty()
+            supplicant = wifi?.supplicant.orEmpty(),
+            dataFreeMb = readDataFreeMb()
         )
         runCatching {
             val file = File(context.filesDir, FILE)
@@ -309,4 +324,16 @@ object Vitals {
             ?.let { String.format("%.0f", it) }
             .orEmpty()
     }.getOrDefault("")
+
+    /**
+     * Free space on the data partition, in megabytes.
+     *
+     * A kiosk that fills its storage stops being able to log, cache, or update,
+     * and the failure looks like anything but a disk problem, so it is worth the
+     * one line it costs to notice.
+     */
+    private fun readDataFreeMb(): Int = runCatching {
+        val stat = android.os.StatFs(Environment.getDataDirectory().path)
+        (stat.availableBytes / (1024 * 1024)).toInt()
+    }.getOrDefault(-1)
 }

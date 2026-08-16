@@ -35,8 +35,24 @@ object EventLog {
 
     private val listeners = mutableSetOf<() -> Unit>()
 
+    /**
+     * Guards the whole read-modify-write below.
+     *
+     * Entries arrive from the watchdog's worker thread and from the accessibility
+     * callback on the main thread, and the log is stored as one serialised blob.
+     * Without this, two overlapping writes both read the same array and the
+     * second one to finish discards the first one's entry - losing exactly the
+     * kind of entry that gets logged when two things are happening at once.
+     */
+    private val writeLock = Any()
+
     fun add(context: Context, level: EventLevel, message: String) {
         Log.i(TAG, "[$level] $message")
+        synchronized(writeLock) { append(context, level, message) }
+        notifyListeners()
+    }
+
+    private fun append(context: Context, level: EventLevel, message: String) {
         val sp = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val array = readArray(sp.getString(KEY, null))
 
@@ -62,7 +78,6 @@ object EventLog {
         // asynchronous so the common path is not paying for this.
         val editor = sp.edit().putString(KEY, trimmed.toString())
         if (level == EventLevel.INFO) editor.apply() else editor.commit()
-        notifyListeners()
     }
 
     /** Newest first, for direct display in the list. */

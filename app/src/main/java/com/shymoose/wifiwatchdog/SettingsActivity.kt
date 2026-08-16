@@ -40,8 +40,13 @@ class SettingsActivity :
         return true
     }
 
-    override fun onSupportNavigateUp(): Boolean {
-        if (supportFragmentManager.backStackEntryCount > 0) {
+    /** Keeps the return-to-kiosk timer from firing mid-configuration. */
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        KioskReturn.noteInteraction()
+    }
+
+    override fun onSupportNavigateUp(): Boolean {        if (supportFragmentManager.backStackEntryCount > 0) {
             supportFragmentManager.popBackStack()
             return true
         }
