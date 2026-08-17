@@ -63,6 +63,13 @@ jobs:
       # The summary comes from the annotated tag, so writing it is part of
       # tagging rather than a separate step that gets forgotten. A lightweight
       # tag has no message and simply leaves the generated changelog on its own.
+      #
+      # Write the tag body as markdown with ONE LINE PER PARAGRAPH OR BULLET.
+      # It is passed through untouched, and GitHub renders a single newline as a
+      # line break - so a body wrapped at 72 columns the way a commit message is
+      # arrives full of ragged breaks. Unwrapping it here was tried and rejected:
+      # it means parsing prose in shell to guess which newlines are structural,
+      # which is more ways to be wrong than just writing the tag correctly.
       - name: Release notes from the tag
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
