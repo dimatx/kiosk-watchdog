@@ -181,7 +181,18 @@ class WifiRecovery(private val context: Context) {
             return hardReset()
         }
         val dwellMs = Prefs(appContext).airplaneDwellSec * 1000L
-        return AirplaneMode.cycle(appContext, dwellMs)
+        if (AirplaneMode.cycle(appContext, dwellMs)) return true
+
+        // The ladder has already counted this rung as taken, so returning here
+        // would mean the heaviest step did nothing at all and the device simply
+        // waited out the backoff. A cycle can fail for reasons that do not stop
+        // the driver being reloaded, so do that rather than nothing.
+        EventLog.add(
+            appContext,
+            EventLevel.WARN,
+            "Airplane cycle did not complete — falling back to hard reset"
+        )
+        return hardReset()
     }
 
     companion object {

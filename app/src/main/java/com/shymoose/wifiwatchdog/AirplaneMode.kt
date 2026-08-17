@@ -76,17 +76,35 @@ object AirplaneMode {
         }
 
         val prefs = Prefs(context)
-        if (!isAssistantOwned(context)) {
-            prefs.previousAssistant = currentAssistant(context) ?: ""
-            val ok = runCatching {
-                Settings.Secure.putString(context.contentResolver, SECURE_VOICE_INTERACTION, ourComponent(context))
-            }.isSuccess
-            if (!ok) {
-                EventLog.add(context, EventLevel.ERROR, "Could not write voice_interaction_service")
-                return false
+        val owned = isAssistantOwned(context)
+        if (!owned) prefs.previousAssistant = currentAssistant(context) ?: ""
+
+        // Written even when the setting already names us. Reaching here with it
+        // already ours means the framework has not bound the service, and
+        // SettingsProvider drops a write identical to the stored value without
+        // notifying anyone - so re-asserting the same string would change
+        // nothing and this would fail identically forever, quietly disabling the
+        // one rung that has actually recovered these displays. Clearing first
+        // makes the value genuinely change. Same reason AccessibilityBinding
+        // removes its component before writing it back.
+        val ok = runCatching {
+            val resolver = context.contentResolver
+            if (owned) {
+                Settings.Secure.putString(resolver, SECURE_VOICE_INTERACTION, "")
+                Thread.sleep(POLL_MS)
             }
-            EventLog.add(context, EventLevel.ACTION, "Claimed assistant slot for airplane control")
+            Settings.Secure.putString(resolver, SECURE_VOICE_INTERACTION, ourComponent(context))
+        }.isSuccess
+        if (!ok) {
+            EventLog.add(context, EventLevel.ERROR, "Could not write voice_interaction_service")
+            return false
         }
+        EventLog.add(
+            context,
+            EventLevel.ACTION,
+            if (owned) "Assistant slot was ours but unbound — re-asserted it"
+            else "Claimed assistant slot for airplane control"
+        )
 
         // The system rebinds asynchronously after the setting changes.
         val deadline = SystemClock.elapsedRealtime() + CLAIM_TIMEOUT_MS

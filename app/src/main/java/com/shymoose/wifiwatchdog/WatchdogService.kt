@@ -118,22 +118,40 @@ class WatchdogService : Service() {
         val claimed = busy.compareAndSet(false, true)
         if (!claimed && coalesce) return
 
-        worker.execute {
-            // Forced work may have queued behind a probe; take the flag now.
-            if (!claimed) busy.set(true)
-            val wake = (getSystemService(Context.POWER_SERVICE) as PowerManager)
-                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WifiWatchdog::tick")
-            wake.acquire(wakeMs)
-            try {
-                block()
-            } catch (t: Throwable) {
-                EventLog.add(this, EventLevel.ERROR, "Task failed: ${t.message}")
-            } finally {
-                busy.set(false)
-                runCatching { if (wake.isHeld) wake.release() }
-                scheduleNext()
-                updateNotification()
+        // Everything below is guarded, because the alarm that drives the next
+        // check is armed in the finally. Anything that escapes it stops the
+        // watchdog for good while the process stays alive and the notification
+        // still shows the last known state - a display that looks fine and is no
+        // longer watching anything.
+        val submitted = runCatching {
+            worker.execute {
+                // Forced work may have queued behind a probe; take the flag now.
+                if (!claimed) busy.set(true)
+                var wake: PowerManager.WakeLock? = null
+                try {
+                    // Inside the try: obtaining this involves a service lookup and
+                    // a cast, and a throw here would skip the reschedule below.
+                    wake = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                        .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WifiWatchdog::tick")
+                    wake.acquire(wakeMs)
+                    block()
+                } catch (t: Throwable) {
+                    EventLog.add(this, EventLevel.ERROR, "Task failed: ${t.message}")
+                } finally {
+                    busy.set(false)
+                    runCatching { if (wake?.isHeld == true) wake.release() }
+                    runCatching { scheduleNext() }
+                    runCatching { updateNotification() }
+                }
             }
+        }.isSuccess
+
+        // The executor refuses new work once it has been shut down. Without this
+        // the claim above would stay taken and every later tick would coalesce
+        // into a job that is never going to run.
+        if (!submitted) {
+            busy.set(false)
+            runCatching { scheduleNext() }
         }
     }
 
@@ -174,7 +192,7 @@ class WatchdogService : Service() {
 
         if (reachable) {
             if (State.stage > 0 || State.consecutiveFailures > 0) {
-                val downFor = (now - prefs.lastGoodAtMillis) / 1000
+                val downFor = observedDownSec(now)
                 EventLog.add(this, EventLevel.INFO, "Connectivity restored after ${formatDuration(downFor)}")
                 report("recovered", downFor)
             }
@@ -193,7 +211,7 @@ class WatchdogService : Service() {
             return
         }
         State.consecutiveFailures++
-        val downSec = (now - prefs.lastGoodAtMillis) / 1000
+        val downSec = observedDownSec(now)
         State.summary = getString(R.string.status_offline)
         State.detail = getString(R.string.status_detail_offline, formatDuration(downSec))
 
@@ -249,6 +267,35 @@ class WatchdogService : Service() {
                 "Radio can see no access points at all — treating this as a failed radio"
             )
         }
+    }
+
+    /**
+     * How long the link has been down *as observed by this run*.
+     *
+     * The last-good timestamp is persisted and only ever advanced by a successful
+     * probe, so after any gap in which the watchdog was not running - an
+     * overnight power-down, a building power cut, an app update, a process kill -
+     * it reports hours or days. The escalation thresholds would all be satisfied
+     * at once and the ladder would climb a rung per tick: at the default interval
+     * that is a driver unload and a full airplane cycle within about eighty
+     * seconds of boot.
+     *
+     * Which is precisely backwards for the most likely case. A power cut takes
+     * the displays and the access point down together; the panels are up in
+     * around thirty seconds and the access point takes minutes, so those first
+     * failures are expected and temporary. Tearing the radio down then only
+     * delays association further, and it fired an alert every time.
+     *
+     * Downtime this process did not witness is therefore not counted. The
+     * configured delays mean "how long have I seen this down", which is the only
+     * thing that can honestly be measured.
+     */
+    private fun observedDownSec(now: Long): Long {
+        val sinceLastGood = (now - prefs.lastGoodAtMillis) / 1000
+        val startedAt = State.startedAt
+        if (startedAt <= 0L) return 0
+        val sinceStart = (now - startedAt) / 1000
+        return minOf(sinceLastGood, sinceStart).coerceAtLeast(0)
     }
 
     private fun escalate(downSec: Long, now: Long) {

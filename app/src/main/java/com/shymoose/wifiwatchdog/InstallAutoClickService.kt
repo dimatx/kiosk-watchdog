@@ -70,6 +70,15 @@ open class InstallAutoClickService : AccessibilityService() {
      */
     private var wakesForThisDialog = 0
 
+    /**
+     * Sweeps of the current dialog that clicked nothing.
+     *
+     * Separate from [wakesForThisDialog], which only governs the display: this
+     * governs the work itself, so an unactionable dialog stops costing a full
+     * tree walk and a synchronous log write every few seconds.
+     */
+    private var fruitlessSweeps = 0
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -115,6 +124,7 @@ open class InstallAutoClickService : AccessibilityService() {
             if (root.packageName?.toString()?.let { isInstaller(this, it) } != true) {
                 // The dialog is gone, so a later one starts with a fresh budget.
                 wakesForThisDialog = 0
+                fruitlessSweeps = 0
                 return
             }
             wakeScreen()
@@ -210,6 +220,15 @@ open class InstallAutoClickService : AccessibilityService() {
     }
 
     private fun handle(root: AccessibilityNodeInfo) {
+        // A dialog nobody can action - Play Protect's warning, or the refusal
+        // shown when installing from this source is not permitted - stays on
+        // screen indefinitely, and the watchdog sweeps every few seconds. Without
+        // a limit that is a full tree walk and a synchronous log write, forever,
+        // for as long as it is showing. Reset by a successful click or by the
+        // installer window going away, so a dialog that is making progress is
+        // never given up on.
+        if (fruitlessSweeps >= MAX_FRUITLESS_SWEEPS) return
+
         val texts = collectText(root)
 
         // Completion screen first: it has no allowlist-bearing prompt text, and
@@ -221,6 +240,8 @@ open class InstallAutoClickService : AccessibilityService() {
         if (finished) {
             if (clickFirst(root, doneLabels, doneIds)) {
                 EventLog.add(this, EventLevel.ACTION, "Dismissed install completion screen")
+            } else {
+                fruitlessSweeps++
             }
             return
         }
@@ -232,9 +253,11 @@ open class InstallAutoClickService : AccessibilityService() {
             texts.any { it.equals(allowed, ignoreCase = true) }
         }
         if (matched == null) {
+            fruitlessSweeps++
             // Only worth a line when a confirm button is actually on screen —
-            // otherwise every installer window would log.
-            if (findNode(root, confirmLabels, confirmIds) != null) {
+            // otherwise every installer window would log. Said once per dialog:
+            // the sweep repeats every few seconds and this writes through to disk.
+            if (fruitlessSweeps == 1 && findNode(root, confirmLabels, confirmIds) != null) {
                 EventLog.add(
                     this,
                     EventLevel.WARN,
@@ -247,11 +270,14 @@ open class InstallAutoClickService : AccessibilityService() {
         if (clickFirst(root, confirmLabels.toList(), confirmIds)) {
             EventLog.add(this, EventLevel.ACTION, "Confirmed install of \"$matched\"")
         } else {
-            EventLog.add(
-                this,
-                EventLevel.ERROR,
-                "Allowlisted \"$matched\" but no clickable confirm button found. Nodes: ${dump(root)}"
-            )
+            fruitlessSweeps++
+            if (fruitlessSweeps == 1) {
+                EventLog.add(
+                    this,
+                    EventLevel.ERROR,
+                    "Allowlisted \"$matched\" but no clickable confirm button found. Nodes: ${dump(root)}"
+                )
+            }
         }
     }
 
@@ -268,7 +294,11 @@ open class InstallAutoClickService : AccessibilityService() {
     ): Boolean {
         val node = findPreferred(root, labels, ids) ?: return false
         val clicked = clickable(node)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
-        if (clicked) lastClickAt = SystemClock.elapsedRealtime()
+        if (clicked) {
+            lastClickAt = SystemClock.elapsedRealtime()
+            // Something moved, so this dialog is worth looking at again.
+            fruitlessSweeps = 0
+        }
         return clicked
     }
 
@@ -456,6 +486,15 @@ open class InstallAutoClickService : AccessibilityService() {
 
         /** Wakes allowed for one dialog before concluding it will not clear. */
         private const val MAX_WAKES_PER_DIALOG = 3
+
+        /**
+         * Sweeps that click nothing before a dialog is left alone.
+         *
+         * Generous enough to cover a slow install - confirm, the progress screen,
+         * then the completion screen are all separate sweeps - while still
+         * bounding the cost of a dialog that is never going to move.
+         */
+        private const val MAX_FRUITLESS_SWEEPS = 10
 
         /** How long a self-test keeps this app's own name allowlisted. */
         private const val SELF_TEST_WINDOW_MS = 120_000L

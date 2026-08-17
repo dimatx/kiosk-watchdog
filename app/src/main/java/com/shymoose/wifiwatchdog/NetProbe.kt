@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import java.io.IOException
 import java.net.ConnectException
+import java.net.Inet4Address
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.TimeUnit
@@ -71,16 +72,30 @@ class NetProbe(private val context: Context) {
      * usable route. Preferred over any fixed address: it follows the device onto
      * whatever network it joins and is the nearest host that can answer, so a
      * failure means the link itself is dead rather than some remote service.
+     *
+     * IPv4 only, deliberately. A dual-stack network publishes a default route for
+     * each family, and the routes are not returned in any guaranteed order, so
+     * taking the first one is a coin toss. The IPv6 default gateway is normally
+     * the router's link-local address, which cannot be reached without also
+     * carrying the interface zone - so picking it makes every probe fail and the
+     * watchdog tears down a healthy radio, over and over. That is exactly what
+     * happened on the first dual-stack network one of these displays met.
+     *
+     * The probe only has to answer "is the link carrying traffic", and the IPv4
+     * gateway answers it on every network these run on.
      */
     fun gateway(): String? {
         runCatching {
             val network = connectivity.activeNetwork ?: return@runCatching null
             connectivity.getLinkProperties(network)
                 ?.routes
-                ?.firstOrNull { it.isDefaultRoute }
-                ?.gateway
+                ?.asSequence()
+                ?.filter { it.isDefaultRoute }
+                ?.mapNotNull { it.gateway }
+                ?.filterIsInstance<Inet4Address>()
+                ?.firstOrNull()
                 ?.hostAddress
-                ?.takeIf { it.isNotBlank() && it != "0.0.0.0" && it != "::" }
+                ?.takeIf { it.isNotBlank() && it != "0.0.0.0" }
         }.getOrNull()?.let { return it }
 
         // DHCP lease. Deprecated, but it survives cases where the route table has
@@ -97,8 +112,41 @@ class NetProbe(private val context: Context) {
      * gateway rarely listens on a TCP port; a TCP connect is the backup. A refused
      * connection counts as success — the peer answered, which is the whole question.
      */
-    fun canReach(target: ProbeTarget, timeoutMs: Int = 5_000): Boolean =
-        ping(target.host, timeoutMs) || tcpReach(target.host, target.port, timeoutMs)
+    /**
+     * Whether to try the TCP connect before the ping.
+     *
+     * A ping means forking `/system/bin/ping` — measured at 56 ms on this
+     * hardware, which is over half the cost of an entire check, paid every
+     * twenty seconds forever. A TCP connect to a gateway one hop away is a
+     * couple of syscalls and returns in milliseconds, so it is tried first.
+     *
+     * Not assumed, though: on a network that silently drops the probe port the
+     * connect would burn its whole timeout before falling back, which is worse
+     * than the fork. So the order is remembered and flipped whenever the
+     * preferred method fails and the other one works. A device settles on
+     * whichever is actually cheaper for its network within one check.
+     */
+    @Volatile
+    private var preferTcp = true
+
+    fun canReach(target: ProbeTarget, timeoutMs: Int = 5_000): Boolean {
+        // Short, because the gateway is one hop away and this is only the first
+        // attempt — anything slower is not worth waiting for when a fallback
+        // exists.
+        val firstTry = if (preferTcp) FAST_TIMEOUT_MS.coerceAtMost(timeoutMs) else timeoutMs
+
+        if (preferTcp) {
+            if (tcpReach(target.host, target.port, firstTry)) return true
+            if (!ping(target.host, timeoutMs)) return false
+            preferTcp = false
+            return true
+        }
+
+        if (ping(target.host, firstTry)) return true
+        if (!tcpReach(target.host, target.port, timeoutMs)) return false
+        preferTcp = true
+        return true
+    }
 
     private fun ping(host: String, timeoutMs: Int): Boolean = try {
         val waitSec = (timeoutMs / 1000).coerceIn(1, 10)
@@ -156,7 +204,9 @@ class NetProbe(private val context: Context) {
             return ProbeTarget(gw, GATEWAY_PORT, ProbeTarget.Source.GATEWAY)
         }
         return prefs.lastGateway
-            .takeIf { it.isNotEmpty() }
+            // A build before this one could have stored an IPv6 gateway here, and
+            // it would keep being used long after discovery stopped returning it.
+            .takeIf { it.isNotEmpty() && !it.contains(':') }
             ?.let { ProbeTarget(it, GATEWAY_PORT, ProbeTarget.Source.LAST_GATEWAY) }
     }
 
@@ -203,5 +253,15 @@ class NetProbe(private val context: Context) {
 
         /** TCP backup port for a gateway. Routers answer DNS far more often than HTTP. */
         const val GATEWAY_PORT = 53
+
+        /**
+         * Timeout for the first of the two reachability attempts.
+         *
+         * The target is the default gateway, so a healthy answer arrives in
+         * single-digit milliseconds. This only needs to be long enough to not
+         * misjudge a momentarily busy link, and short enough that falling back to
+         * the other method is cheaper than waiting.
+         */
+        private const val FAST_TIMEOUT_MS = 1_500
     }
 }

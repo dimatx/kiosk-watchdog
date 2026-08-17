@@ -284,20 +284,41 @@ object Vitals {
      * otherwise, so it is worth sampling.
      */
     private fun readWlanSubsys(): Pair<String, Int>? = runCatching {
-        File("/sys/bus/msm_subsys").resolve("devices").listFiles()
+        wlanSubsysDir()?.let { dev ->
+            val state = runCatching { File(dev, "state").readText().trim() }.getOrDefault("")
+            val crashes = runCatching {
+                File(dev, "crash_count").readText().trim().toInt()
+            }.getOrDefault(0)
+            state to crashes
+        }
+    }.getOrNull()
+
+    /**
+     * Which subsystem is the Wi-Fi one, resolved once.
+     *
+     * Finding it means reading a `name` file for every subsystem on the SoC.
+     * That answer cannot change while the kernel is up, so doing it on every
+     * check would be pure waste on a device that takes one every twenty seconds
+     * for months at a time.
+     */
+    @Volatile
+    private var wlanSubsysDir: File? = null
+
+    @Volatile
+    private var wlanSubsysResolved = false
+
+    private fun wlanSubsysDir(): File? {
+        if (wlanSubsysResolved) return wlanSubsysDir
+        val found = File("/sys/bus/msm_subsys/devices").listFiles()
             ?.firstOrNull { dev ->
                 runCatching { File(dev, "name").readText().trim() }
                     .getOrDefault("")
                     .let { it.startsWith("AR6") || it.contains("wcnss", ignoreCase = true) }
             }
-            ?.let { dev ->
-                val state = runCatching { File(dev, "state").readText().trim() }.getOrDefault("")
-                val crashes = runCatching {
-                    File(dev, "crash_count").readText().trim().toInt()
-                }.getOrDefault(0)
-                state to crashes
-            }
-    }.getOrNull()
+        wlanSubsysDir = found
+        wlanSubsysResolved = true
+        return found
+    }
 
     /**
      * The hottest SoC sensor, in Celsius.
@@ -314,15 +335,9 @@ object Vitals {
      * than guessed at.
      */
     private fun readMaxTempC(): String = runCatching {
-        val zones = File("/sys/class/thermal").listFiles()
-            ?.filter { it.name.startsWith("thermal_zone") }
-            .orEmpty()
-        val soc = zones.filter { zone ->
-            runCatching { File(zone, "type").readText().trim() }.getOrDefault("").startsWith("tsens")
-        }
-        (soc.ifEmpty { zones })
-            .mapNotNull { zone ->
-                val raw = runCatching { File(zone, "temp").readText().trim().toLong() }.getOrNull()
+        tempFiles()
+            .mapNotNull { file ->
+                val raw = runCatching { file.readText().trim().toLong() }.getOrNull()
                 when {
                     raw == null -> null
                     raw > 10_000 -> raw / 1000.0
@@ -335,6 +350,29 @@ object Vitals {
             ?.let { String.format("%.0f", it) }
             .orEmpty()
     }.getOrDefault("")
+
+    /**
+     * The `temp` files worth reading, resolved once.
+     *
+     * Working out which zones are the SoC dies means reading a `type` file for
+     * every thermal zone - 23 of them on this hardware - and the answer is fixed
+     * for the life of the kernel. Only the temperatures themselves need re-reading.
+     */
+    @Volatile
+    private var tempFiles: List<File>? = null
+
+    private fun tempFiles(): List<File> {
+        tempFiles?.let { return it }
+        val zones = File("/sys/class/thermal").listFiles()
+            ?.filter { it.name.startsWith("thermal_zone") }
+            .orEmpty()
+        val soc = zones.filter { zone ->
+            runCatching { File(zone, "type").readText().trim() }.getOrDefault("").startsWith("tsens")
+        }
+        val resolved = (soc.ifEmpty { zones }).map { File(it, "temp") }
+        tempFiles = resolved
+        return resolved
+    }
 
     /**
      * Free space on the data partition, in megabytes.
