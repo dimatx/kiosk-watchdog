@@ -194,7 +194,10 @@ class WatchdogService : Service() {
             if (State.stage > 0 || State.consecutiveFailures > 0) {
                 val downFor = observedDownSec(now)
                 EventLog.add(this, EventLevel.INFO, "Connectivity restored after ${formatDuration(downFor)}")
-                report("recovered", downFor)
+                // Only worth telling anyone about if they were told it was down.
+                // A stall that cleared before the ladder touched anything is not
+                // a recovery, it is a link that was never actually broken.
+                if (State.reportedLost) report("recovered", downFor)
             }
             // The link is up: this is the only moment queued notifications can go out.
             Ntfy.flush(this)
@@ -204,6 +207,7 @@ class WatchdogService : Service() {
             prefs.lastGoodAtMillis = now
             State.consecutiveFailures = 0
             State.stage = 0
+            State.reportedLost = false
             State.backoffSec = INITIAL_BACKOFF_SEC
             State.nextHardResetAt = 0L
             State.summary = getString(R.string.status_online)
@@ -215,9 +219,13 @@ class WatchdogService : Service() {
         State.summary = getString(R.string.status_offline)
         State.detail = getString(R.string.status_detail_offline, formatDuration(downSec))
 
+        // Logged locally on the first miss, because the event log is where an
+        // intermittent link gets diagnosed. Deliberately not sent anywhere: the
+        // ladder has already decided a short outage is not worth acting on, so
+        // reporting one is telling somebody about a non-event. The alert goes
+        // out when the watchdog actually does something. See act().
         if (State.consecutiveFailures == 1) {
             EventLog.add(this, EventLevel.WARN, "Cannot reach $label")
-            report("lost", 0)
         }
 
         escalate(downSec, now)
@@ -317,17 +325,17 @@ class WatchdogService : Service() {
 
         when (State.stage) {
             0 -> if (downSec >= prefs.reassociateAfterSec) {
-                act { recovery.reassociate() }
+                act(downSec) { recovery.reassociate() }
                 State.stage = 1
             }
 
             1 -> if (downSec >= prefs.softToggleAfterSec) {
-                act { recovery.softToggle() }
+                act(downSec) { recovery.softToggle() }
                 State.stage = 2
             }
 
             2 -> if (blind || downSec >= prefs.hardResetAfterSec) {
-                act { if (hardResetUsable()) recovery.hardReset() else recovery.softToggle() }
+                act(downSec) { if (hardResetUsable()) recovery.hardReset() else recovery.softToggle() }
                 State.stage = 3
                 report("hard_reset", downSec)
             }
@@ -335,7 +343,7 @@ class WatchdogService : Service() {
             3 -> if (blind || downSec >= prefs.airplaneAfterSec) {
                 // The heaviest rung: a real airplane-mode cycle, which is what has
                 // actually brought this device back when nothing else did.
-                act { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
+                act(downSec) { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
                 State.stage = 4
                 State.backoffSec = INITIAL_BACKOFF_SEC
                 State.nextHardResetAt = now + State.backoffSec * 1000L
@@ -343,7 +351,7 @@ class WatchdogService : Service() {
             }
 
             else -> if (now >= State.nextHardResetAt) {
-                act { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
+                act(downSec) { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
                 val ceiling = if (blind) BLIND_MAX_BACKOFF_SEC else MAX_BACKOFF_SEC
                 State.backoffSec = (State.backoffSec * 2).coerceAtMost(ceiling)
                 State.nextHardResetAt = now + State.backoffSec * 1000L
@@ -358,13 +366,28 @@ class WatchdogService : Service() {
     }
 
     /**
-     * Runs a recovery action and notes when it finished.
+     * Runs a recovery action, announcing the outage the first time.
      *
-     * The timestamp is what stops the radio's own recovery being read as another
-     * failure: the scan list is empty for a while after a reload, and without a
-     * settle window that would escalate straight into the next rung.
+     * The alert belongs here rather than at the first failed probe. The ladder's
+     * whole premise is that a short outage is not worth acting on - that is what
+     * the delays before each rung are for - so reporting one the moment a probe
+     * misses says "something is wrong" about a link the app has already judged
+     * fine. In practice that meant a wall tablet whose radio stalls for ten
+     * seconds sent a pair of notifications every half hour, every one of them
+     * ending at stage 0, having done nothing, because there was nothing to do.
+     *
+     * Reported once per outage, before the action rather than after, so the
+     * message still goes out even if the action wedges.
+     *
+     * The timestamp is also what stops the radio's own recovery being read as
+     * another failure: the scan list is empty for a while after a reload, and
+     * without a settle window that would escalate straight into the next rung.
      */
-    private inline fun act(block: () -> Unit) {
+    private inline fun act(downSec: Long, block: () -> Unit) {
+        if (!State.reportedLost) {
+            State.reportedLost = true
+            report("lost", downSec)
+        }
         try {
             block()
         } finally {
@@ -594,6 +617,15 @@ class WatchdogService : Service() {
 
         /** When the last recovery action ran, so its own aftermath is not counted. */
         var lastActionAt: Long = 0L
+
+        /**
+         * Whether this outage has been announced.
+         *
+         * Set when the ladder first acts, cleared on recovery. It is also what
+         * decides whether a restored message is worth sending: a stall that
+         * cleared before anything was done is not a recovery.
+         */
+        var reportedLost: Boolean = false
 
         /**
          * Whether the radio is confirmed blind: enabled, but seeing nothing.
