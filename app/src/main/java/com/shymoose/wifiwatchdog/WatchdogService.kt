@@ -259,10 +259,16 @@ class WatchdogService : Service() {
 
         // Down: ask on every check. The results land in time for the next one.
         lastScanRequestAt = now
-        probe.requestScan()
+        val scanAccepted = probe.requestScan()
 
-        // -1 is "could not read", which is not evidence of anything.
-        if (wifi.scanCount != 0) {
+        // A zero only means anything if a scan was actually going to happen.
+        // The framework can decline outright - measured on a display that had
+        // been asleep for hours, where every request was refused and the list
+        // stayed empty on a radio that was working perfectly. Counting that as
+        // a blind radio would send a merely-offline display straight to a
+        // driver reload and an airplane cycle, skipping the gentler steps that
+        // usually suffice. -1 is "could not read", which says nothing either.
+        if (wifi.scanCount != 0 || !scanAccepted) {
             State.blindChecks = 0
             return
         }
