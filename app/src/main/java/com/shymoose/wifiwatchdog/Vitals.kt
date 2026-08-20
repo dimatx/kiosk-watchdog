@@ -30,6 +30,9 @@ object Vitals {
     private const val MAX_BYTES = 96 * 1024L
     private const val KEEP_BYTES = 48 * 1024
 
+    /** Recorded in place of a value the platform would not let us read. */
+    private const val UNREADABLE = "?"
+
     /** One reading. Absent values are recorded as an empty field rather than a zero. */
     data class Sample(
         val at: Long,
@@ -44,8 +47,8 @@ object Vitals {
         val wifiEnabled: Boolean = true,
         val iface: String = "",
         val bssid: String = "",
-        val rxMb: Long = 0,
-        val mv: Int = 0,
+        val rxMb: Long = -1,
+        val mv: Int = -1,
         val wlanCrashes: Int = 0,
         val wlanSubsys: String = "",
         val supplicant: String = "",
@@ -82,7 +85,11 @@ object Vitals {
                 rssi != null -> "$rssi dBm"
                 else -> "no link"
             }
-            val radio = if (iface.isEmpty()) " iface gone" else " $iface"
+            val radio = when (iface) {
+                UNREADABLE -> " iface ?"
+                "" -> " iface gone"
+                else -> " $iface"
+            }
             val ap = if (bssid.isEmpty()) "" else " ap $bssid"
             // Only worth the width when it is saying something.
             val radioFw = buildString {
@@ -113,8 +120,18 @@ object Vitals {
                 scanCount == 0 -> "  APS NONE"
                 else -> "  aps ?"
             }
-            return "$clock  up ${uptimeSec / 60}m  mem ${memAvailMb}MB  load $load1  " +
-                "${tempC}C  $link$radio$ap  rx ${rxMb}MB  ${mv}mV  stage $stage$radioFw$supp$seen$disk"
+            // Every field follows the same rule: a value that could not be read
+            // prints "?", never a plausible-looking zero. On Android 12 and
+            // later most of these sources are closed to apps, and a fabricated
+            // "rx 0MB" or "iface gone" reads exactly like the failure this
+            // recorder exists to explain.
+            val up = if (uptimeSec < 0) "up ?" else "up ${uptimeSec / 60}m"
+            val loadTxt = "load " + load1.ifEmpty { "?" }
+            val temp = tempC.ifEmpty { "?" } + "C"
+            val rx = if (rxMb < 0) "rx ?" else "rx ${rxMb}MB"
+            val volts = if (mv < 0) "?mV" else "${mv}mV"
+            return "$clock  $up  mem ${memAvailMb}MB  $loadTxt  " +
+                "$temp  $link$radio$ap  $rx  $volts  stage $stage$radioFw$supp$seen$disk"
         }
 
         companion object {
@@ -126,7 +143,7 @@ object Vitals {
                 if (f.size < 9) return null
                 return Sample(
                     at = f[0].toLongOrNull() ?: return null,
-                    uptimeSec = f[1].toLongOrNull() ?: 0,
+                    uptimeSec = f[1].toLongOrNull() ?: -1,
                     memAvailMb = f[2].toIntOrNull() ?: 0,
                     load1 = f[3],
                     tempC = f[4],
@@ -138,8 +155,8 @@ object Vitals {
                     wifiEnabled = f.getOrNull(9) != "0",
                     iface = f.getOrNull(10).orEmpty(),
                     bssid = f.getOrNull(11).orEmpty(),
-                    rxMb = f.getOrNull(12)?.toLongOrNull() ?: 0,
-                    mv = f.getOrNull(13)?.toIntOrNull() ?: 0,
+                    rxMb = f.getOrNull(12)?.toLongOrNull() ?: -1,
+                    mv = f.getOrNull(13)?.toIntOrNull() ?: -1,
                     wlanCrashes = f.getOrNull(14)?.toIntOrNull() ?: 0,
                     wlanSubsys = f.getOrNull(15).orEmpty(),
                     supplicant = f.getOrNull(16).orEmpty(),
@@ -171,7 +188,9 @@ object Vitals {
             wifiEnabled = wifi?.wifiEnabled ?: false,
             iface = readIfaceState(),
             bssid = wifi?.bssid?.takeLast(8).orEmpty(),
-            rxMb = readRxBytes() / (1024 * 1024),
+            // Guarded, because integer division would turn the unreadable
+            // sentinel into a perfectly plausible zero.
+            rxMb = readRxBytes().let { if (it < 0) -1L else it / (1024 * 1024) },
             mv = readMilliVolts(),
             wlanCrashes = wlan?.second ?: 0,
             wlanSubsys = wlan?.first.orEmpty(),
@@ -221,7 +240,7 @@ object Vitals {
 
     private fun readUptimeSec(): Long = runCatching {
         File("/proc/uptime").readText().substringBefore(' ').toDouble().toLong()
-    }.getOrDefault(0L)
+    }.getOrDefault(-1L)
 
     private fun readMemAvailableMb(): Int = runCatching {
         File("/proc/meminfo").readLines()
@@ -243,17 +262,23 @@ object Vitals {
      * empty result therefore means the radio is gone, not merely disconnected.
      */
     private fun readIfaceState(): String = runCatching {
-        val dir = File("/sys/class/net/wlan0")
-        if (!dir.exists()) return ""
-        val state = runCatching { File(dir, "operstate").readText().trim() }.getOrDefault("?")
-        val carrier = runCatching { File(dir, "carrier").readText().trim() }.getOrDefault("?")
+        val state = runCatching { File("/sys/class/net/wlan0/operstate").readText().trim() }.getOrNull()
+        if (state == null) {
+            // Unreadable is not the same as absent, and conflating them is
+            // actively misleading: "gone" is a freeze symptom, while newer
+            // Android simply refuses an app this directory. If the name is
+            // still listed, the interface exists and only the read failed.
+            val names = runCatching { File("/sys/class/net").list() }.getOrNull()
+            return if (names == null || names.contains("wlan0")) UNREADABLE else ""
+        }
+        val carrier = runCatching { File("/sys/class/net/wlan0/carrier").readText().trim() }.getOrDefault("?")
         if (carrier == "1") state else "$state/nocarrier"
-    }.getOrDefault("")
+    }.getOrDefault(UNREADABLE)
 
     /** Total received bytes, so a link that is associated but passing nothing shows up. */
     private fun readRxBytes(): Long = runCatching {
         File("/sys/class/net/wlan0/statistics/rx_bytes").readText().trim().toLong()
-    }.getOrDefault(0L)
+    }.getOrDefault(-1L)
 
     /**
      * Supply rail in millivolts.
@@ -268,7 +293,7 @@ object Vitals {
         val raw = File("/sys/class/power_supply/battery/voltage_now").readText().trim().toLong()
         // Reported in microvolts on this platform, millivolts on others.
         (if (raw > 100_000) raw / 1000 else raw).toInt()
-    }.getOrDefault(0)
+    }.getOrDefault(-1)
 
     /**
      * State and crash count of the Wi-Fi subsystem, as the kernel sees it.
