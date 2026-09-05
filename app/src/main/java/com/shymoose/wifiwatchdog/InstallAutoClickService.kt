@@ -257,6 +257,8 @@ open class InstallAutoClickService : AccessibilityService() {
     }
 
     private fun handle(root: AccessibilityNodeInfo) {
+        if (!Prefs(this).autoInstallEnabled) return
+
         // A dialog nobody can action - Play Protect's warning, or the refusal
         // shown when installing from this source is not permitted - stays on
         // screen indefinitely, and the watchdog sweeps every few seconds. Without

@@ -24,7 +24,12 @@ import android.provider.Settings
  * protected broadcast is involved and a normal app holding only
  * `WRITE_SECURE_SETTINGS` can drive it.
  */
-class WifiRecovery(private val context: Context) {
+class WifiRecovery internal constructor(
+    private val context: Context,
+    private val sleep: (Long) -> Unit
+) {
+
+    constructor(context: Context) : this(context, Thread::sleep)
 
     private val appContext = context.applicationContext
     private val wifi: WifiManager =
@@ -50,17 +55,29 @@ class WifiRecovery(private val context: Context) {
      * Middle rung: plain Wi-Fi off/on. Clears the connection state machine but,
      * with scan-always on, leaves the driver loaded.
      */
-    @Suppress("DEPRECATION")
-    fun softToggle(): Boolean = runCatching {
-        if (!WifiPower.prepareForReset(appContext)) return@runCatching false
-        EventLog.add(appContext, EventLevel.ACTION, "Soft Wi-Fi toggle (off -> on)")
-        val disabled = WifiPower.disable(appContext)
-        Thread.sleep(SOFT_OFF_MS)
-        val enabled = WifiPower.enable(appContext)
-        disabled && enabled
-    }.getOrElse {
-        EventLog.add(appContext, EventLevel.ERROR, "Soft toggle failed: ${it.message}")
-        false
+    fun softToggle(): Boolean {
+        if (!WifiPower.prepareForReset(appContext)) return false
+        var restored = false
+        return try {
+            EventLog.add(appContext, EventLevel.ACTION, "Soft Wi-Fi toggle (off -> on)")
+            try {
+                if (!WifiPower.disable(appContext)) return false
+                sleep(SOFT_OFF_MS)
+            } finally {
+                restored = restoreWifi()
+            }
+            restored
+        } catch (e: InterruptedException) {
+            try {
+                EventLog.add(appContext, EventLevel.WARN, "Soft toggle interrupted; Wi-Fi restored=$restored")
+            } finally {
+                Thread.currentThread().interrupt()
+            }
+            false
+        } catch (e: SecurityException) {
+            EventLog.add(appContext, EventLevel.ERROR, "Soft toggle failed: ${e.message}")
+            false
+        }
     }
 
     /**
@@ -70,8 +87,11 @@ class WifiRecovery(private val context: Context) {
      * The previous value of `wifi_scan_always_enabled` is always restored, even
      * if the toggle throws part-way through.
      */
-    @Suppress("DEPRECATION")
     fun hardReset(): Boolean {
+        if (!Prefs(appContext).hardResetEnabled) {
+            EventLog.add(appContext, EventLevel.INFO, "Hard reset disabled — using soft toggle")
+            return softToggle()
+        }
         if (!hasSecureSettingsPermission()) {
             EventLog.add(
                 appContext,
@@ -95,6 +115,8 @@ class WifiRecovery(private val context: Context) {
             ?: Settings.Global.getInt(resolver, SCAN_ALWAYS, 1).takeIf { it == 1 }
             ?: 1
 
+        var scanRestored = false
+        var wifiRestored = false
         return try {
             EventLog.add(
                 appContext,
@@ -102,32 +124,75 @@ class WifiRecovery(private val context: Context) {
                 "Hard reset: unloading Wi-Fi driver (scan_always -> 0, will restore $restoreTo)"
             )
             prefs.scanAlwaysRestore = restoreTo
-            Settings.Global.putInt(resolver, SCAN_ALWAYS, 0)
-            Thread.sleep(SETTLE_MS)
+            try {
+                if (!writeScanAlways(0)) return false
+                sleep(SETTLE_MS)
 
-            val disabled = WifiPower.disable(appContext)
-            Thread.sleep(HARD_OFF_MS)
+                if (!WifiPower.disable(appContext)) return false
+                sleep(HARD_OFF_MS)
 
-            // Restore before re-enabling so the radio comes back in its normal mode.
-            Settings.Global.putInt(resolver, SCAN_ALWAYS, restoreTo)
-            Thread.sleep(SETTLE_MS)
-
-            val enabled = WifiPower.enable(appContext)
-            val ok = disabled && enabled
+                // Restore before re-enabling so the radio comes back in its normal mode.
+                scanRestored = writeScanAlways(restoreTo)
+                if (scanRestored) sleep(SETTLE_MS)
+            } finally {
+                try {
+                    if (!scanRestored) scanRestored = writeScanAlways(restoreTo)
+                    if (scanRestored) prefs.scanAlwaysRestore = -1
+                } finally {
+                    // Stopping the service interrupts sleeps, but must never
+                    // interrupt the obligation to turn the radio back on.
+                    wifiRestored = restoreWifi()
+                }
+            }
+            val ok = scanRestored && wifiRestored
             EventLog.add(
                 appContext,
                 if (ok) EventLevel.ACTION else EventLevel.ERROR,
-                if (ok) "Hard reset complete — radio re-enabled" else "Hard reset failed — Wi-Fi state change was not confirmed"
+                if (ok) "Hard reset complete — radio re-enabled" else "Hard reset: restoration incomplete"
             )
             ok
-        } catch (t: Throwable) {
-            EventLog.add(appContext, EventLevel.ERROR, "Hard reset failed: ${t.message}")
+        } catch (e: InterruptedException) {
+            try {
+                EventLog.add(appContext, EventLevel.WARN, "Hard reset interrupted; Wi-Fi restored=$wifiRestored")
+            } finally {
+                Thread.currentThread().interrupt()
+            }
             false
-        } finally {
-            // Belt and braces: never leave scan-always turned off.
-            runCatching { Settings.Global.putInt(resolver, SCAN_ALWAYS, restoreTo) }
-            prefs.scanAlwaysRestore = -1
+        } catch (e: SecurityException) {
+            EventLog.add(appContext, EventLevel.ERROR, "Hard reset failed: ${e.message}")
+            false
         }
+    }
+
+    private fun restoreWifi(): Boolean {
+        var interrupted = Thread.interrupted()
+        var restored = false
+        try {
+            restored = WifiPower.enable(appContext)
+            return restored
+        } catch (e: InterruptedException) {
+            interrupted = true
+            EventLog.add(appContext, EventLevel.WARN, "Wi-Fi restoration interrupted — will retry")
+            return false
+        } catch (e: SecurityException) {
+            EventLog.add(appContext, EventLevel.ERROR, "Could not restore Wi-Fi: ${e.message}")
+            return false
+        } finally {
+            try {
+                if (!restored) AirplaneMode.scheduleRestore(appContext)
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt()
+            }
+        }
+    }
+
+    private fun writeScanAlways(value: Int): Boolean = try {
+        val ok = Settings.Global.putInt(appContext.contentResolver, SCAN_ALWAYS, value)
+        if (!ok) EventLog.add(appContext, EventLevel.ERROR, "Could not set background Wi-Fi scanning to $value")
+        ok
+    } catch (e: SecurityException) {
+        EventLog.add(appContext, EventLevel.ERROR, "Could not set background Wi-Fi scanning: ${e.message}")
+        false
     }
 
     /**
@@ -159,8 +224,8 @@ class WifiRecovery(private val context: Context) {
         }
         if (!hasSecureSettingsPermission()) return
 
-        val ok = runCatching { Settings.Global.putInt(resolver, SCAN_ALWAYS, wanted) }.isSuccess
-        prefs.scanAlwaysRestore = -1
+        val ok = writeScanAlways(wanted)
+        if (ok) prefs.scanAlwaysRestore = -1
         EventLog.add(
             appContext,
             if (ok) EventLevel.ACTION else EventLevel.ERROR,
@@ -184,6 +249,10 @@ class WifiRecovery(private val context: Context) {
         }
         val dwellMs = Prefs(appContext).airplaneDwellSec * 1000L
         if (AirplaneMode.cycle(appContext, dwellMs)) return true
+        if (Thread.currentThread().isInterrupted) {
+            EventLog.add(appContext, EventLevel.WARN, "Airplane cycle interrupted — skipping further recovery")
+            return false
+        }
 
         // The ladder has already counted this rung as taken, so returning here
         // would mean the heaviest step did nothing at all and the device simply

@@ -33,6 +33,7 @@ object AirplaneMode {
     private const val TOGGLE_TIMEOUT_MS = 20_000L
     private const val SETTLE_MS = 2_000L
     private const val FAILSAFE_MARGIN_MS = 30_000L
+    private const val FAILSAFE_RETRY_MS = 60_000L
     private const val FAILSAFE_REQUEST = 4711
 
     private const val SECURE_VOICE_INTERACTION = "voice_interaction_service"
@@ -157,7 +158,7 @@ object AirplaneMode {
      *
      * @param dwellMs how long to stay in airplane mode.
      */
-    @Suppress("DEPRECATION")
+    @Synchronized
     fun cycle(context: Context, dwellMs: Long): Boolean {
         val app = context.applicationContext
         if (!isAvailable(app)) {
@@ -170,63 +171,88 @@ object AirplaneMode {
         val prefs = Prefs(app)
         prefs.airplanePending = true
         armFailsafe(app, dwellMs + 2 * TOGGLE_TIMEOUT_MS + SETTLE_MS + WifiPower.TIMEOUT_MS + FAILSAFE_MARGIN_MS)
-        var restored = false
 
+        var cycled = false
+        var restored = false
         try {
             EventLog.add(
                 app,
                 EventLevel.ACTION,
                 "Airplane cycle: radios down for ${WatchdogService.formatDuration(dwellMs / 1000)}"
             )
-            if (!request(app, true)) {
-                // Never leave it half-done.
-                ensureOff(app)
-                return false
+            if (request(app, true)) {
+                Thread.sleep(dwellMs)
+                cycled = request(app, false)
+                if (cycled) Thread.sleep(SETTLE_MS)
             }
-
-            Thread.sleep(dwellMs)
-
-            if (!request(app, false)) {
-                ensureOff(app)
-                return false
+        } catch (e: InterruptedException) {
+            try {
+                EventLog.add(app, EventLevel.WARN, "Airplane cycle interrupted — restoring radios")
+            } finally {
+                Thread.currentThread().interrupt()
             }
-
-            Thread.sleep(SETTLE_MS)
-            restored = WifiPower.enable(app)
-            if (!restored) return false
-            EventLog.add(app, EventLevel.ACTION, "Airplane cycle complete")
-            return true
-        } catch (t: Throwable) {
-            EventLog.add(app, EventLevel.ERROR, "Airplane cycle failed: ${t.message}")
-            ensureOff(app)
-            return false
+        } catch (e: SecurityException) {
+            EventLog.add(app, EventLevel.ERROR, "Airplane cycle failed: ${e.message}")
         } finally {
-            if (restored) {
-                prefs.airplanePending = false
-                cancelFailsafe(app)
-            }
+            restored = ensureOff(app)
         }
+        if (cycled && restored) EventLog.add(app, EventLevel.ACTION, "Airplane cycle complete")
+        return cycled && restored
     }
 
     /**
      * Idempotent cleanup. Safe to call on boot, on service start, or from the
      * failsafe alarm.
      */
+    @Synchronized
     fun ensureOff(context: Context): Boolean {
+        // Capture before any commit: SharedPreferences can consume an interrupt
+        // while waiting for disk I/O.
+        var interrupted = Thread.interrupted()
         val app = context.applicationContext
-        if (isOn(app)) {
-            EventLog.add(app, EventLevel.WARN, "Airplane mode still on — forcing it off")
-            if (!hasPermission(app)) return false
-            if (!claimAssistant(app)) return false
-            if (!request(app, false)) return false
-            Thread.sleep(SETTLE_MS)
+        val prefs = Prefs(app)
+
+        // Cancellation stops recovery, not its cleanup. Restore the interrupt
+        // status afterward so the caller cannot start another recovery rung.
+        var restored = false
+        try {
+            prefs.airplanePending = true
+            armFailsafe(
+                app,
+                CLAIM_TIMEOUT_MS + TOGGLE_TIMEOUT_MS + SETTLE_MS + WifiPower.TIMEOUT_MS + FAILSAFE_MARGIN_MS
+            )
+            if (isOn(app)) {
+                EventLog.add(app, EventLevel.WARN, "Airplane mode still on — forcing it off")
+                if (!hasPermission(app) || !claimAssistant(app) || !request(app, false)) return false
+                Thread.sleep(SETTLE_MS)
+            }
+            restored = WifiPower.enable(app)
+            return restored
+        } catch (e: InterruptedException) {
+            interrupted = true
+            EventLog.add(app, EventLevel.WARN, "Airplane restoration interrupted — will retry")
+            return false
+        } catch (e: SecurityException) {
+            EventLog.add(app, EventLevel.ERROR, "Airplane restoration failed: ${e.message}")
+            return false
+        } finally {
+            try {
+                if (restored) {
+                    prefs.airplanePending = false
+                    cancelFailsafe(app)
+                } else {
+                    armFailsafe(app, FAILSAFE_RETRY_MS)
+                    EventLog.add(app, EventLevel.WARN, "Radio restoration incomplete — failsafe retry armed")
+                }
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt()
+            }
         }
-        val ok = WifiPower.enable(app)
-        if (ok) {
-            Prefs(app).airplanePending = false
-            cancelFailsafe(app)
-        }
-        return ok
+    }
+
+    internal fun scheduleRestore(context: Context) {
+        Prefs(context).airplanePending = true
+        armFailsafe(context, FAILSAFE_RETRY_MS)
     }
 
     // ---------------------------------------------------------------- failsafe

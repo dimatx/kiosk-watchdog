@@ -70,7 +70,7 @@ class WatchdogService : Service() {
 
             ACTION_FORCE_HARD_RESET -> runOnWorker(coalesce = false) { forceHardReset() }
 
-            ACTION_FORCE_AIRPLANE -> runOnWorker(coalesce = false, wakeMs = WAKE_TIMEOUT_LONG_MS) {
+            ACTION_FORCE_AIRPLANE -> runOnWorker(coalesce = false) {
                 forceAirplaneCycle()
             }
 
@@ -86,7 +86,7 @@ class WatchdogService : Service() {
                 // A reboot or crash during an airplane cycle would otherwise leave
                 // the radios down with nothing left running to bring them back.
                 if (prefs.airplanePending || AirplaneMode.isOn(this)) {
-                    runOnWorker(coalesce = false, wakeMs = WAKE_TIMEOUT_LONG_MS) {
+                    runOnWorker(coalesce = false) {
                         AirplaneMode.ensureOff(this)
                     }
                 }
@@ -114,7 +114,6 @@ class WatchdogService : Service() {
      */
     private fun runOnWorker(
         coalesce: Boolean = true,
-        wakeMs: Long = WAKE_TIMEOUT_MS,
         block: () -> Unit
     ) {
         val claimed = busy.compareAndSet(false, true)
@@ -135,7 +134,7 @@ class WatchdogService : Service() {
                     // a cast, and a throw here would skip the reschedule below.
                     wake = (getSystemService(Context.POWER_SERVICE) as PowerManager)
                         .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WifiWatchdog::tick")
-                    wake.acquire(wakeMs)
+                    wake.acquire(WAKE_TIMEOUT_MS)
                     block()
                 } catch (t: Throwable) {
                     EventLog.add(this, EventLevel.ERROR, "Task failed: ${t.message}")
@@ -672,10 +671,9 @@ class WatchdogService : Service() {
 
         private const val CHANNEL_ID = "watchdog"
         private const val NOTIFICATION_ID = 1001
-        private const val WAKE_TIMEOUT_MS = 90_000L
-
-        /** Airplane cycles dwell for a while, so they need far more headroom. */
-        private const val WAKE_TIMEOUT_LONG_MS = 10 * 60_000L
+        // A normal tick can run the same five-minute airplane dwell as a manual
+        // action. This is only a ceiling; every job releases its lock on exit.
+        internal const val WAKE_TIMEOUT_MS = 10 * 60_000L
         private const val INITIAL_BACKOFF_SEC = 300
         private const val MAX_BACKOFF_SEC = 1800
 

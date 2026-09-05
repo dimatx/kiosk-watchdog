@@ -332,11 +332,21 @@ the slot back on request. This is the same mechanism MacroDroid uses.
 
 ### Failsafe
 
-Airplane mode is the one action that can strand the device, so it's guarded. Before
-enabling it the app commits an `airplanePending` flag and arms an `AlarmManager`
-failsafe at `dwell + 30s`. If the process is killed mid-cycle, both the boot receiver
-and the service's `onStartCommand` see the pending flag and force airplane mode back
-off.
+Before enabling airplane mode the app commits an `airplanePending` flag and arms
+an `AlarmManager` failsafe covering the dwell, radio-transition timeouts, and a
+30-second margin. If the process is killed mid-cycle, both the boot receiver and
+the service's `onStartCommand` see the pending flag and restore the radios.
+
+The flag and alarm are cleared only after airplane mode is off and Wi-Fi is
+confirmed enabled. Failed cleanup re-arms a retry for 60 seconds later, including
+when monitoring is paused. Stopping during a soft toggle or hard reset still
+restores Wi-Fi; if restoration fails, the same failsafe retries it. Automatic and
+manual recovery share a wake-lock ceiling that covers the longest supported dwell,
+and release the lock as soon as the work finishes.
+
+Disabling **Confirm update dialogs** stops app-install clicks, not the separate
+Wi-Fi consent handling needed on Android 13. Disabling **Allow full driver reload**
+also applies to fallback recovery after an unsuccessful airplane cycle.
 
 ---
 
