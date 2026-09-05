@@ -15,8 +15,9 @@ which is normally impossible for an unprivileged app on Android 8.1.
 ![Android 8.1+](https://img.shields.io/badge/Android-8.1%2B-3ddc84)
 
 > Built for a Lenovo ThinkSmart View (`starfire`) on LineageOS 15.1, but nothing in it
-> is device-specific. Any rootless Android 8.1+ device works — adb access once is needed
-> for the Wi-Fi recovery ladder, but not for the update auto-confirm.
+> is device-specific. Recovery depends on the Android build's Wi-Fi controls — adb
+> access once enables the stronger rungs. Some Android 13+ builds additionally require
+> the accessibility service to confirm Wi-Fi enabling.
 
 ---
 
@@ -72,6 +73,27 @@ adb shell dumpsys deviceidle whitelist +com.shymoose.wifiwatchdog
 ```
 
 Want the assistant slot back? **Release assistant slot** in the overflow menu.
+
+### Android 13+ Wi-Fi confirmation
+
+Some builds let a legacy app switch Wi-Fi off directly but require a system **Allow**
+dialog to turn it back on. Android can return success while that dialog is still
+waiting; that is not proof the radio is on.
+
+The watchdog uses its existing accessibility service to confirm **only its own**
+in-flight Wi-Fi enable request. It matches the system dialog package, the exact
+localized title naming this app, the message, and the positive button. Requests from
+other apps are never approved. This is independent of **Confirm update dialogs**.
+With `WRITE_SECURE_SETTINGS`, recovery binds the service automatically when needed;
+without that grant, enable it under **App updates → Enable accessibility service**.
+If the required handler cannot be prepared, recovery refuses to switch Wi-Fi off.
+An asleep display is briefly woken and an unsecured keyguard is dismissed so the
+confirmation can be reached. Devices with a secured lock screen are not reset
+through this confirmation-gated path.
+
+Every power-changing rung waits for the actual Wi-Fi state, not just API acceptance.
+An unconfirmed transition is reported as a failed attempt. If Wi-Fi remains off, the
+watchdog retries enabling it rather than repeatedly cycling airplane mode.
 
 ---
 

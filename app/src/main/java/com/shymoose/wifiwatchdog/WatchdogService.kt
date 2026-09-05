@@ -36,6 +36,8 @@ class WatchdogService : Service() {
 
     /** Rate limit for asking the radio to scan while the link is healthy. */
     private var lastScanRequestAt: Long = 0L
+    private var nextWifiEnableAt = 0L
+    private var wifiEnableFailureReported = false
 
     /** What the ongoing notification currently says, so identical updates are dropped. */
     private var lastNotifiedSummary: String? = null
@@ -210,6 +212,8 @@ class WatchdogService : Service() {
             State.reportedLost = false
             State.backoffSec = INITIAL_BACKOFF_SEC
             State.nextHardResetAt = 0L
+            nextWifiEnableAt = 0L
+            wifiEnableFailureReported = false
             State.summary = getString(R.string.status_online)
             State.detail = getString(R.string.status_detail_online, label)
             return
@@ -313,6 +317,19 @@ class WatchdogService : Service() {
     }
 
     private fun escalate(downSec: Long, now: Long) {
+        // Cycling an already-disabled radio cannot repair an enable request
+        // that is waiting for approval. Restore power before climbing the ladder.
+        if (State.wifi?.wifiEnabled == false) {
+            if (downSec >= prefs.reassociateAfterSec && now >= nextWifiEnableAt) {
+                val enabled = act(downSec) { WifiPower.enable(this) }
+                nextWifiEnableAt = now + 60_000L
+                if (!enabled && !wifiEnableFailureReported) {
+                    report("wifi_enable", downSec, false)
+                    wifiEnableFailureReported = true
+                }
+            }
+            return
+        }
         // A radio that can see nothing is not going to be talked round by asking
         // it to re-associate with an access point it cannot find. The cheap rungs
         // are there for a link that is merely unhappy; this one is broken, so it
@@ -341,23 +358,23 @@ class WatchdogService : Service() {
             }
 
             2 -> if (blind || downSec >= prefs.hardResetAfterSec) {
-                act(downSec) { if (hardResetUsable()) recovery.hardReset() else recovery.softToggle() }
+                val completed = act(downSec) { if (hardResetUsable()) recovery.hardReset() else recovery.softToggle() }
                 State.stage = 3
-                report("hard_reset", downSec)
+                report("hard_reset", downSec, completed)
             }
 
             3 -> if (blind || downSec >= prefs.airplaneAfterSec) {
                 // The heaviest rung: a real airplane-mode cycle, which is what has
                 // actually brought this device back when nothing else did.
-                act(downSec) { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
+                val completed = act(downSec) { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
                 State.stage = 4
                 State.backoffSec = INITIAL_BACKOFF_SEC
                 State.nextHardResetAt = now + State.backoffSec * 1000L
-                report("airplane_cycle", downSec)
+                report("airplane_cycle", downSec, completed)
             }
 
             else -> if (now >= State.nextHardResetAt) {
-                act(downSec) { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
+                val completed = act(downSec) { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
                 val ceiling = if (blind) BLIND_MAX_BACKOFF_SEC else MAX_BACKOFF_SEC
                 State.backoffSec = (State.backoffSec * 2).coerceAtMost(ceiling)
                 State.nextHardResetAt = now + State.backoffSec * 1000L
@@ -366,7 +383,7 @@ class WatchdogService : Service() {
                     EventLevel.INFO,
                     "Still down — next recovery attempt in ${formatDuration(State.backoffSec.toLong())}"
                 )
-                report("airplane_cycle", downSec)
+                report("airplane_cycle", downSec, completed)
             }
         }
     }
@@ -389,13 +406,13 @@ class WatchdogService : Service() {
      * another failure: the scan list is empty for a while after a reload, and
      * without a settle window that would escalate straight into the next rung.
      */
-    private inline fun act(downSec: Long, block: () -> Unit) {
+    private inline fun act(downSec: Long, block: () -> Boolean): Boolean {
         if (!State.reportedLost) {
             State.reportedLost = true
             report("lost", downSec)
         }
         try {
-            block()
+            return block()
         } finally {
             State.lastActionAt = System.currentTimeMillis()
             State.blindChecks = 0
@@ -412,9 +429,8 @@ class WatchdogService : Service() {
     private fun hardResetUsable(): Boolean =
         prefs.hardResetEnabled && recovery.hasSecureSettingsPermission()
 
-    private fun lastResortReset() {
+    private fun lastResortReset(): Boolean =
         if (hardResetUsable()) recovery.hardReset() else recovery.softToggle()
-    }
 
     private fun forceHardReset() {
         EventLog.add(this, EventLevel.ACTION, "Manual recovery triggered")
@@ -438,12 +454,14 @@ class WatchdogService : Service() {
      * would only stall the recovery ladder behind a socket timeout. The queue is
      * drained on the next successful probe.
      */
-    private fun report(event: String, downSeconds: Long) {
+    private fun report(event: String, downSeconds: Long, completed: Boolean? = null) {
         if (!prefs.ntfyConfigured) return
         val at = System.currentTimeMillis()
         val id = DeviceIdentity.snapshot(this)
 
-        val (title, priority, tags) = when (event) {
+        val (title, priority, tags) = if (completed == false) {
+            Triple(getString(R.string.ntfy_title_recovery_failed), Ntfy.PRIORITY_URGENT, "warning")
+        } else when (event) {
             "lost" -> Triple(getString(R.string.ntfy_title_lost), Ntfy.PRIORITY_HIGH, "warning")
             "hard_reset" -> Triple(
                 getString(R.string.ntfy_title_hard_reset),
@@ -471,6 +489,7 @@ class WatchdogService : Service() {
             id.oneLine(),
             getString(R.string.ntfy_line_when, Ntfy.timestamp(at))
         )
+        if (completed == false) lines.add(getString(R.string.ntfy_line_recovery_failed, event))
         if (event == "recovered") {
             lines.add(getString(R.string.ntfy_line_down_for, formatDuration(downSeconds)))
         } else if (downSeconds > 0) {

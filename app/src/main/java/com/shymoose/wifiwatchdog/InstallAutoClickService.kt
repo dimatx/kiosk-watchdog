@@ -30,14 +30,16 @@ enum class SetupResult { ALREADY_ON, ENABLED, NEEDS_MANUAL, FAILED }
  *
  * Two things keep that from being a blanket "click yes on anything":
  *
- *  1. Events are filtered to the installer package, so nothing else is ever
- *     touched.
+ *  1. Install handling is filtered to the installer package.
  *  2. The dialog's app label must appear in [Prefs.autoInstallAllowlist]. The
  *     node tree exposes the human-readable label rather than the target
  *     package, so the label is what gets matched.
  *
  * After a successful install the completion screen is dismissed too, preferring
  * OPEN over DONE so the kiosk comes back up by itself.
+ *
+ * The same service confirms this app's in-flight Wi-Fi enable request, using a
+ * separate exact-match handler. It never approves another app's Wi-Fi request.
  */
 open class InstallAutoClickService : AccessibilityService() {
 
@@ -81,6 +83,10 @@ open class InstallAutoClickService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        serviceInfo = serviceInfo.apply {
+            packageNames = (resolveInstallers(this@InstallAutoClickService) + WifiEnablePrompt.PACKAGE).toTypedArray()
+            flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        }
         instance = this
         Prefs(this).autoInstallServiceEverOn = true
         EventLog.add(this, EventLevel.INFO, "Install auto-click service connected")
@@ -118,7 +124,34 @@ open class InstallAutoClickService : AccessibilityService() {
         main.post { sweepOnMain() }
     }
 
+    private fun sweepWifiOnMain() {
+        val expected = WifiPower.pendingPrompt ?: return
+        val root = rootInActiveWindow ?: return
+        try {
+            if (!expected.matches(root.packageName?.toString(), collectText(root), SystemClock.elapsedRealtime())) return
+            val button = root.findAccessibilityNodeInfosByViewId("android:id/button1")
+                .firstOrNull { it.text?.toString()?.trim().equals(expected.allow, ignoreCase = true) }
+                ?: return
+            try {
+                if (WifiPower.pendingPrompt !== expected ||
+                    SystemClock.elapsedRealtime() >= expected.expiresAt ||
+                    SystemClock.elapsedRealtime() - lastClickAt < CLICK_COOLDOWN_MS) return
+                if (button.isEnabled && button.isClickable &&
+                    button.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    lastClickAt = SystemClock.elapsedRealtime()
+                    EventLog.add(this, EventLevel.ACTION, "Confirmed this app's Wi-Fi enable request")
+                }
+            } finally {
+                button.recycle()
+            }
+        } finally {
+            root.recycle()
+        }
+    }
+
     private fun sweepOnMain() {
+        sweepWifiOnMain()
+        if (!Prefs(this).autoInstallEnabled) return
         val root = rootInActiveWindow ?: return
         try {
             if (root.packageName?.toString()?.let { isInstaller(this, it) } != true) {
@@ -202,6 +235,10 @@ open class InstallAutoClickService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        if (event.packageName?.toString() == WifiEnablePrompt.PACKAGE) {
+            sweepWifiOnMain()
+            return
+        }
         if (!Prefs(this).autoInstallEnabled) return
 
         val pkg = event.packageName?.toString() ?: return
@@ -411,6 +448,11 @@ open class InstallAutoClickService : AccessibilityService() {
         /** Runs a sweep if the service is bound; a no-op otherwise. */
         fun sweepIfBound() {
             instance?.sweepNow()
+        }
+
+        fun sweepWifiIfBound() {
+            val service = instance ?: return
+            service.main.post { service.sweepWifiOnMain() }
         }
 
         /**

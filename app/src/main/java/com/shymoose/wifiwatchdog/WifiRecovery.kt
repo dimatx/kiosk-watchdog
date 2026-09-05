@@ -52,12 +52,12 @@ class WifiRecovery(private val context: Context) {
      */
     @Suppress("DEPRECATION")
     fun softToggle(): Boolean = runCatching {
+        if (!WifiPower.prepareForReset(appContext)) return@runCatching false
         EventLog.add(appContext, EventLevel.ACTION, "Soft Wi-Fi toggle (off -> on)")
-        wifi.isWifiEnabled = false
+        val disabled = WifiPower.disable(appContext)
         Thread.sleep(SOFT_OFF_MS)
-        val ok = wifi.setWifiEnabled(true)
-        if (!ok) EventLog.add(appContext, EventLevel.ERROR, "setWifiEnabled(true) was rejected")
-        ok
+        val enabled = WifiPower.enable(appContext)
+        disabled && enabled
     }.getOrElse {
         EventLog.add(appContext, EventLevel.ERROR, "Soft toggle failed: ${it.message}")
         false
@@ -80,6 +80,7 @@ class WifiRecovery(private val context: Context) {
             )
             return softToggle()
         }
+        if (!WifiPower.prepareForReset(appContext)) return false
 
         val resolver = appContext.contentResolver
         val prefs = Prefs(appContext)
@@ -104,18 +105,19 @@ class WifiRecovery(private val context: Context) {
             Settings.Global.putInt(resolver, SCAN_ALWAYS, 0)
             Thread.sleep(SETTLE_MS)
 
-            wifi.isWifiEnabled = false
+            val disabled = WifiPower.disable(appContext)
             Thread.sleep(HARD_OFF_MS)
 
             // Restore before re-enabling so the radio comes back in its normal mode.
             Settings.Global.putInt(resolver, SCAN_ALWAYS, restoreTo)
             Thread.sleep(SETTLE_MS)
 
-            val ok = wifi.setWifiEnabled(true)
+            val enabled = WifiPower.enable(appContext)
+            val ok = disabled && enabled
             EventLog.add(
                 appContext,
-                EventLevel.ACTION,
-                if (ok) "Hard reset complete — radio re-enabled" else "Hard reset: re-enable was rejected"
+                if (ok) EventLevel.ACTION else EventLevel.ERROR,
+                if (ok) "Hard reset complete — radio re-enabled" else "Hard reset failed — Wi-Fi state change was not confirmed"
             )
             ok
         } catch (t: Throwable) {

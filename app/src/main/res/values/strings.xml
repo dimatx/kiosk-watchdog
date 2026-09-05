@@ -134,6 +134,8 @@
     <string name="ntfy_title_hard_reset">Wi-Fi driver reset</string>
     <string name="ntfy_title_airplane">Airplane-mode cycle</string>
     <string name="ntfy_title_recovered">Wi-Fi restored</string>
+    <string name="ntfy_title_recovery_failed">Wi-Fi recovery attempt failed</string>
+    <string name="ntfy_line_recovery_failed">Action: %1$s. The required radio state change was not confirmed; see the device activity log.</string>
     <string name="ntfy_title_test">Watchdog test</string>
     <string name="ntfy_line_when">Occurred: %1$s</string>
     <string name="ntfy_line_down_for">Down for: %1$s</string>
@@ -164,7 +166,7 @@
     <!-- Only ever used when the system has permanently blocked the entry above; named
          so the two are told apart in the Accessibility list, where both are shown. -->
     <string name="a11y_install_label_alt">Kiosk Watchdog install auto-confirm (standby)</string>
-    <string name="a11y_install_description">Taps INSTALL on the system update dialog for allowlisted apps, so a display mounted on a wall can finish an app update without anyone walking over to it. Only the package installer\'s own screens are ever read.</string>
+    <string name="a11y_install_description">Confirms system update dialogs for allowlisted apps. During Wi-Fi recovery, also confirms Android\'s Wi-Fi enable dialog only when it names Kiosk Watchdog and this app has a pending enable request. Other apps\' Wi-Fi requests are left alone.</string>
     <string name="pref_auto_install_enabled">Confirm update dialogs</string>
     <string name="pref_auto_install_enabled_summary">Taps INSTALL when an allowlisted app updates itself, then dismisses the completion screen with OPEN so the app comes back up. Also needs the accessibility service turned on below.</string>
     <string name="pref_auto_install_allowlist">Allowed apps</string>

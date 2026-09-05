@@ -7,8 +7,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.wifi.WifiManager
-import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 
@@ -166,11 +164,13 @@ object AirplaneMode {
             EventLog.add(app, EventLevel.WARN, "Airplane cycle skipped — WRITE_SECURE_SETTINGS not granted")
             return false
         }
+        if (!WifiPower.prepareForReset(app)) return false
         if (!claimAssistant(app)) return false
 
         val prefs = Prefs(app)
         prefs.airplanePending = true
-        armFailsafe(app, dwellMs + FAILSAFE_MARGIN_MS)
+        armFailsafe(app, dwellMs + 2 * TOGGLE_TIMEOUT_MS + SETTLE_MS + WifiPower.TIMEOUT_MS + FAILSAFE_MARGIN_MS)
+        var restored = false
 
         try {
             EventLog.add(
@@ -192,7 +192,8 @@ object AirplaneMode {
             }
 
             Thread.sleep(SETTLE_MS)
-            restoreWifi(app)
+            restored = WifiPower.enable(app)
+            if (!restored) return false
             EventLog.add(app, EventLevel.ACTION, "Airplane cycle complete")
             return true
         } catch (t: Throwable) {
@@ -200,8 +201,10 @@ object AirplaneMode {
             ensureOff(app)
             return false
         } finally {
-            prefs.airplanePending = false
-            cancelFailsafe(app)
+            if (restored) {
+                prefs.airplanePending = false
+                cancelFailsafe(app)
+            }
         }
     }
 
@@ -211,29 +214,19 @@ object AirplaneMode {
      */
     fun ensureOff(context: Context): Boolean {
         val app = context.applicationContext
-        Prefs(app).airplanePending = false
-        cancelFailsafe(app)
-        if (!isOn(app)) {
-            restoreWifi(app)
-            return true
-        }
-        EventLog.add(app, EventLevel.WARN, "Airplane mode still on — forcing it off")
-        if (!hasPermission(app)) return false
-        if (!claimAssistant(app)) return false
-        val ok = request(app, false)
-        if (ok) {
+        if (isOn(app)) {
+            EventLog.add(app, EventLevel.WARN, "Airplane mode still on — forcing it off")
+            if (!hasPermission(app)) return false
+            if (!claimAssistant(app)) return false
+            if (!request(app, false)) return false
             Thread.sleep(SETTLE_MS)
-            restoreWifi(app)
+        }
+        val ok = WifiPower.enable(app)
+        if (ok) {
+            Prefs(app).airplanePending = false
+            cancelFailsafe(app)
         }
         return ok
-    }
-
-    @Suppress("DEPRECATION")
-    private fun restoreWifi(context: Context) {
-        runCatching {
-            val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            if (!wm.isWifiEnabled) wm.setWifiEnabled(true)
-        }
     }
 
     // ---------------------------------------------------------------- failsafe
