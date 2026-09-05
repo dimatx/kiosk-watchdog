@@ -21,6 +21,18 @@ which is normally impossible for an unprivileged app on Android 8.1.
 
 ---
 
+## Screenshots
+
+<p>
+  <img src="docs/screenshots/status.png" alt="Connection status, browser setup, and recovery activity log" width="360">
+  <img src="docs/screenshots/settings.png" alt="Settings organized into connection checks, recovery steps, app updates, and alerts" width="360">
+</p>
+
+Network details and timestamps are replaced with example values. The screenshots
+contain no real network addresses, Wi-Fi names, credentials, or notification URLs.
+
+---
+
 ## Highlights
 
 - 🔁 **Four-rung recovery ladder** — from a polite `reassociate` all the way to a full
