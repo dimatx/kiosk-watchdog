@@ -227,10 +227,18 @@ out across five tabs — **General**, **Probe**, **Recovery**, **Reporting** and
 - **Restarts are debounced**, so tabbing through several fields reschedules the
   watchdog once, not once per keystroke.
 
-**The server shuts itself down five minutes after you open the app**, and it only ever
-listens on your LAN. Re-open the app to get another five minutes. The ntfy password is
+**The server shuts itself down five minutes after you open the app.**
+Use it only on a trusted network; it listens on the device's network interfaces.
+Re-open the app to get another five minutes. The ntfy password is
 never sent to the browser — it renders as a masked placeholder, and a separate
 checkbox clears it.
+
+The setup server accepts at most four active requests and eight waiting connections.
+Requests are limited to 64 KiB bodies, 16 KiB total headers, 8 KiB lines, and 64 headers.
+Each connection has a 15-second lifetime, including queue time and response writes,
+plus a 10-second idle-read timeout. Oversized or malformed requests are rejected before
+settings change; excess connections are closed. Closing setup also closes active and
+waiting sockets without blocking the app on an in-progress settings write.
 
 > Treat it as a trusted-LAN convenience, not an admin panel: there is no
 > authentication, so anyone on the same network can change the settings during that
@@ -381,8 +389,15 @@ seconds after a failed attempt. IP and MAC are cached whenever they're readable,
 outage report can still identify the device once the interface is gone — a cached value
 is marked `(last known)`.
 
-**Send test notification** in Settings publishes immediately and records the outcome in
-the event log.
+Delivery runs separately from connectivity monitoring and heartbeats. Each flush has
+a 30-second budget, with up to 10 seconds per HTTP request; messages not yet delivered
+stay in the outbox for a later healthy probe. Concurrent outage events are retained
+even while an earlier notification is being sent.
+
+**Send test notification** in Settings requests immediate delivery and records the
+outcome in the event log. Each reporter allows one waiting manual request; additional
+requests report that delivery is busy rather than growing an unbounded work queue.
+Notification messages themselves remain in the persistent outbox.
 
 ### Setting the device name
 
@@ -398,7 +413,7 @@ adb shell settings put global device_name 'living-room-tablet'
 ## Heartbeat webhook
 
 Optional, and independent of ntfy. While the link is healthy the app sends a plain `GET`
-to a URL of your choice every *n* seconds (default 300).
+to a URL of your choice every *n* seconds (default 120).
 
 It's a heartbeat, not an event hook: during an outage the app deliberately sends
 **nothing**, and that silence is what makes a push monitor raise the alarm.
@@ -413,8 +428,11 @@ https://kuma.example.com/api/push/<token>?status=up&msg=OK&ping={ping}
 placeholders are substituted when present: `{ping}` (last probe round-trip in ms, left
 unencoded so it can be appended to Kuma's `ping=`), `{device}`, `{ip}` and `{mac}`.
 
-Nothing is queued or retried — a missed heartbeat is *meant* to be missed. Only
-transitions are logged, so a long outage can't flood the event log.
+Automatic heartbeats are never queued behind an in-flight request — a missed heartbeat
+is *meant* to be missed, and the next healthy probe supplies a fresh opportunity.
+Heartbeats have their own reporter, so a notification backlog cannot delay them or the
+watchdog. HTTP requests have a 10-second deadline, and response bodies are not buffered.
+Only transitions are logged, so a long outage can't flood the event log.
 
 ---
 
@@ -457,3 +475,46 @@ the release automatically.
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
+
+## Optional: restore network ADB after reboot (LineageOS only)
+
+**Restore network ADB after reboot** is **off by default**, under Settings →
+Recovery and on the browser configuration page. It is unavailable on stock Android
+and Fire OS, or when the separate Lineage secure-settings grant is missing.
+
+After installing this version, grant the additional permission once from an already
+authorized ADB connection:
+
+```bash
+adb shell pm grant com.shymoose.wifiwatchdog lineageos.permission.WRITE_SECURE_SETTINGS
+```
+
+This does **not** replace the existing
+`android.permission.WRITE_SECURE_SETTINGS` grant. Granting either permission does
+not opt in: explicitly turn on the new setting on each supported tablet.
+
+On `BOOT_COMPLETED` only—not app updates, opening Settings, or service restarts—the
+app requests Lineage's native network ADB port **5555**, preserving an already-set
+valid network port. The short provider operation runs off the receiver's main
+thread and also works while watchdog monitoring is paused. It uses the native
+`lineagesettings` provider's `GET_secure` / `PUT_secure` API for `adb_port`;
+no root, shell commands, system-property writes, or authentication changes are used.
+USB debugging and authorized ADB keys are left alone.
+
+LineageOS 15.1 initializes `adb_port` from `service.adb.tcp.port` during system
+startup (normally `-1` after a reboot), then registers its native settings observer.
+The app waits for the normal boot-completed broadcast, after that initialization;
+an unavailable or malformed native setting is logged as a failure rather than
+blindly created on an incompatible ROM.
+
+Use this only on a **trusted network**: ADB provides powerful device access.
+The event log reports whether the native setting was read back successfully or
+why restoration failed. A verified setting is **not proof of a listening TCP
+socket**; verify reconnection separately after reboot. The app does not enable USB
+debugging or repair a disabled ADB daemon. Turning the option off prevents future
+boot restoration; to close network ADB immediately, use Lineage's developer setting.
+
+Native API reference: [LineageSettings (15.1)](https://github.com/LineageOS/android_lineage-sdk/blob/lineage-15.1/sdk/src/java/lineageos/providers/LineageSettings.java)
+and [LineageSettingsProvider](https://github.com/LineageOS/android_lineage-sdk/blob/lineage-15.1/packages/LineageSettingsProvider/src/org/lineageos/lineagesettings/LineageSettingsProvider.java).
+Boot initialization and the native observer are in
+[SystemServer](https://github.com/LineageOS/android_frameworks_base/blob/lineage-15.1/services/java/com/android/server/SystemServer.java).

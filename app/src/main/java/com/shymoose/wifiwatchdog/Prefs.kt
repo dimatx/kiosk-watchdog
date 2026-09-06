@@ -180,6 +180,10 @@ class Prefs(context: Context) {
     val keepBluetoothOff: Boolean
         get() = sp.getBoolean(KEY_KEEP_BT_OFF, DEFAULT_KEEP_BT_OFF)
 
+    /** Only LineageOS, and only after an explicit opt-in and separate adb grant. */
+    val restoreNetworkAdb: Boolean
+        get() = sp.getBoolean(KEY_RESTORE_NETWORK_ADB, DEFAULT_RESTORE_NETWORK_ADB)
+
     /** Package to put back in front; blank turns the behaviour off. */
     val kioskPackage: String
         get() = sp.getString(KEY_KIOSK_PACKAGE, DEFAULT_KIOSK_PACKAGE)!!.trim()
@@ -225,6 +229,7 @@ class Prefs(context: Context) {
         const val KEY_HEARTBEAT_TEST = "heartbeat_test"
         const val KEY_AUTO_INSTALL_ENABLED = "auto_install_enabled"
         const val KEY_KEEP_BT_OFF = "keep_bluetooth_off"
+        const val KEY_RESTORE_NETWORK_ADB = "restore_network_adb"
         const val KEY_KIOSK_PACKAGE = "kiosk_package"
         const val KEY_KIOSK_RETURN_MIN = "kiosk_return_after_min"
         const val KEY_AUTO_INSTALL_ALLOWLIST = "auto_install_allowlist"
@@ -274,6 +279,7 @@ class Prefs(context: Context) {
 
         /** Off by default: a display that genuinely uses Bluetooth should keep it. */
         const val DEFAULT_KEEP_BT_OFF = false
+        const val DEFAULT_RESTORE_NETWORK_ADB = false
 
         /**
          * Harmless when absent - the feature checks the package is installed - so

@@ -14,16 +14,23 @@ class BootReceiver : BroadcastReceiver() {
 
         // If we were interrupted mid-cycle the radios may still be off, and
         // nothing else is going to turn them back on.
-        if (prefs.airplanePending || AirplaneMode.isOn(app)) {
+        val restoreAirplane = prefs.airplanePending || AirplaneMode.isOn(app)
+        // Independent of monitoring; package updates must not turn network ADB on.
+        val restoreAdb = action == Intent.ACTION_BOOT_COMPLETED && prefs.restoreNetworkAdb
+        if (restoreAirplane || restoreAdb) {
+            // A receiver has only one PendingResult, shared by both boot tasks.
             val pending = goAsync()
-            Thread {
+            Thread({
                 try {
-                    EventLog.add(app, EventLevel.WARN, "Airplane mode was still on at boot — clearing")
-                    AirplaneMode.ensureOff(app)
+                    if (restoreAdb) NetworkAdb.restoreIfEnabled(app)
+                    if (restoreAirplane) {
+                        EventLog.add(app, EventLevel.WARN, "Airplane mode was still on at boot — clearing")
+                        AirplaneMode.ensureOff(app)
+                    }
                 } finally {
                     pending.finish()
                 }
-            }.start()
+            }, "boot-restoration").start()
         }
 
         if (!prefs.enabled) return

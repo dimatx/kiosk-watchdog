@@ -1,8 +1,6 @@
 package com.shymoose.wifiwatchdog
 
 import android.content.Context
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
  * Generic outbound heartbeat: a URL that gets hit on a fixed cadence for as
@@ -18,8 +16,6 @@ import java.net.URL
  * so anything that accepts a plain GET works.
  */
 object Heartbeat {
-
-    private const val TIMEOUT_MS = 5_000
 
     /** Logged only on transitions so a long outage cannot flood the event log. */
     private var failing = false
@@ -37,7 +33,12 @@ object Heartbeat {
      *
      * @param rttMs round-trip time of the probe that proved the link is up.
      */
-    fun maybePing(context: Context, prefs: Prefs, rttMs: Long) {
+    internal fun maybePing(
+        context: Context,
+        prefs: Prefs,
+        rttMs: Long,
+        deliver: (ReportingRequest, Long) -> DeliveryResult = ReportingHttp::send
+    ) {
         if (!prefs.heartbeatConfigured) return
         val now = System.currentTimeMillis()
         val periodMs = prefs.heartbeatIntervalSec * 1000L
@@ -50,12 +51,18 @@ object Heartbeat {
         // the schedule should restart from now instead of firing a burst to
         // catch up.
         val anchor = if (last != 0L && now - due < periodMs) due else now
-        send(context, prefs, rttMs, manual = false, stampAt = anchor)
+        send(context, prefs, rttMs, manual = false, stampAt = anchor, deliver = deliver)
     }
 
     /** Ignores the schedule. Used by the settings screen to prove the URL works. */
-    fun pingNow(context: Context, prefs: Prefs, rttMs: Long): Boolean =
-        send(context, prefs, rttMs, manual = true, stampAt = System.currentTimeMillis())
+    internal fun pingNow(
+        context: Context,
+        prefs: Prefs,
+        rttMs: Long,
+        deliver: (ReportingRequest, Long) -> DeliveryResult = ReportingHttp::send
+    ): Boolean = send(
+        context, prefs, rttMs, manual = true, stampAt = System.currentTimeMillis(), deliver = deliver
+    )
 
     private fun send(
         context: Context,
@@ -63,9 +70,11 @@ object Heartbeat {
         rttMs: Long,
         manual: Boolean,
         stampAt: Long,
+        deliver: (ReportingRequest, Long) -> DeliveryResult,
     ): Boolean {
         val url = expand(context, prefs.heartbeatUrl, rttMs)
-        val ok = runCatching { get(url) }.getOrDefault(false)
+        val result = deliver(ReportingRequest(url), ReportingHttp.TIMEOUT_MS)
+        val ok = result == DeliveryResult.Delivered
 
         if (ok) {
             prefs.heartbeatLastAt = stampAt
@@ -75,29 +84,16 @@ object Heartbeat {
                 EventLog.add(context, EventLevel.INFO, context.getString(R.string.log_heartbeat_ok))
             }
             failing = false
-        } else {
+        } else if (result is DeliveryResult.Failed) {
             if (manual || !failing) {
-                EventLog.add(context, EventLevel.WARN, context.getString(R.string.log_heartbeat_failed))
+                EventLog.add(
+                    context, EventLevel.WARN,
+                    context.getString(R.string.log_heartbeat_failed) + " (${result.reason})"
+                )
             }
             failing = true
         }
         return ok
-    }
-
-    private fun get(url: String): Boolean {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = TIMEOUT_MS
-            readTimeout = TIMEOUT_MS
-            useCaches = false
-        }
-        return try {
-            // The body is irrelevant, but it has to be drained for connection reuse.
-            runCatching { conn.inputStream.use { it.readBytes() } }
-            conn.responseCode in 200..299
-        } finally {
-            runCatching { conn.disconnect() }
-        }
     }
 
     /**

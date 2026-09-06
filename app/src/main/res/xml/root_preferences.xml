@@ -63,6 +63,11 @@
                 app:key="keep_bluetooth_off"
                 app:summary="@string/pref_keep_bt_off_summary"
                 app:title="@string/pref_keep_bt_off" />
+            <SwitchPreferenceCompat
+                app:defaultValue="false"
+                app:key="restore_network_adb"
+                app:summary="@string/pref_network_adb_summary"
+                app:title="@string/pref_network_adb" />
         </PreferenceCategory>
 
         <PreferenceCategory app:title="@string/cat_airplane">

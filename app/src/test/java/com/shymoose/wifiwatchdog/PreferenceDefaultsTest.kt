@@ -45,6 +45,7 @@ class PreferenceDefaultsTest {
         Prefs.KEY_AIRPLANE_ENABLED to "true",
         Prefs.KEY_AUTO_INSTALL_ENABLED to "true",
         Prefs.KEY_KEEP_BT_OFF to Prefs.DEFAULT_KEEP_BT_OFF.toString(),
+        Prefs.KEY_RESTORE_NETWORK_ADB to Prefs.DEFAULT_RESTORE_NETWORK_ADB.toString(),
         Prefs.KEY_KIOSK_PACKAGE to Prefs.DEFAULT_KIOSK_PACKAGE,
         Prefs.KEY_KIOSK_RETURN_MIN to Prefs.DEFAULT_KIOSK_RETURN_MIN.toString(),
         Prefs.KEY_AUTO_INSTALL_ALLOWLIST to Prefs.DEFAULT_AUTO_INSTALL_ALLOWLIST

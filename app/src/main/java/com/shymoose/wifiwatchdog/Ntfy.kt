@@ -5,12 +5,11 @@ import android.util.Base64
 import androidx.preference.PreferenceManager
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.OutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Push notifications via ntfy (https://docs.ntfy.sh).
@@ -33,8 +32,11 @@ object Ntfy {
     private const val MAX_QUEUED = 25
     private const val MAX_AGE_MS = 24L * 60 * 60 * 1000
     private const val RETRY_BACKOFF_MS = 60_000L
-    private const val TIMEOUT_MS = 5_000
+    internal const val FLUSH_BUDGET_MS = 30_000L
     private const val DELAYED_THRESHOLD_MS = 90_000L
+    private val queueLock = Any()
+    private val flushing = AtomicBoolean(false)
+    private var failing = false
 
     data class Message(
         val title: String,
@@ -52,20 +54,23 @@ object Ntfy {
         if (!prefs.ntfyConfigured) return
 
         val sp = PreferenceManager.getDefaultSharedPreferences(context)
-        val array = readOutbox(sp)
-        array.put(
-            JSONObject()
-                .put("title", message.title)
-                .put("body", message.body)
-                .put("priority", message.priority)
-                .put("tags", message.tags)
-                .put("at", message.at)
-        )
-        // Drop from the front so the newest events always survive the cap.
-        val trimmed = JSONArray()
-        val start = (array.length() - MAX_QUEUED).coerceAtLeast(0)
-        for (i in start until array.length()) trimmed.put(array.optJSONObject(i) ?: continue)
-        sp.edit().putString(KEY_OUTBOX, trimmed.toString()).apply()
+        synchronized(queueLock) {
+            val array = readOutbox(sp)
+            array.put(
+                JSONObject()
+                    .put("id", UUID.randomUUID().toString())
+                    .put("title", message.title)
+                    .put("body", message.body)
+                    .put("priority", message.priority)
+                    .put("tags", message.tags)
+                    .put("at", message.at)
+            )
+            // Drop from the front so the newest events always survive the cap.
+            val trimmed = JSONArray()
+            val start = (array.length() - MAX_QUEUED).coerceAtLeast(0)
+            for (i in start until array.length()) trimmed.put(array.optJSONObject(i) ?: continue)
+            sp.edit().putString(KEY_OUTBOX, trimmed.toString()).apply()
+        }
     }
 
     fun pendingCount(context: Context): Int =
@@ -76,55 +81,86 @@ object Ntfy {
      * failure so ordering is preserved, and backs off so a reachable gateway
      * with no internet does not stall every tick.
      */
-    fun flush(context: Context, force: Boolean = false) {
+    internal fun flush(
+        context: Context,
+        force: Boolean = false,
+        canSend: () -> Boolean = { true },
+        deliver: (ReportingRequest, Long) -> DeliveryResult = ReportingHttp::send,
+        nanoTime: () -> Long = System::nanoTime
+    ) {
         val prefs = Prefs(context)
         if (!prefs.ntfyConfigured) return
-
-        val sp = PreferenceManager.getDefaultSharedPreferences(context)
-        var array = readOutbox(sp)
-        if (array.length() == 0) return
-
-        val now = System.currentTimeMillis()
-        if (!force && now < sp.getLong(KEY_NEXT_ATTEMPT, 0L)) return
-
+        if (!flushing.compareAndSet(false, true)) return
         var delivered = 0
-        var failed = false
+        try {
+            val sp = PreferenceManager.getDefaultSharedPreferences(context)
+            if (!force && System.currentTimeMillis() < sp.getLong(KEY_NEXT_ATTEMPT, 0L)) return
+            val started = nanoTime()
 
+            repeat(MAX_QUEUED) {
+                val remaining = FLUSH_BUDGET_MS - (nanoTime() - started) / 1_000_000L
+                if (remaining <= 0 || !canSend() || !prefs.ntfyConfigured) return
+                val item = nextMessage(sp) ?: return
+                when (val result = deliver(request(prefs, item), remaining.coerceAtMost(ReportingHttp.TIMEOUT_MS))) {
+                    DeliveryResult.Delivered -> {
+                        acknowledge(sp, item.getString("id"))
+                        sp.edit().remove(KEY_NEXT_ATTEMPT).apply()
+                        delivered++
+                        failing = false
+                    }
+                    is DeliveryResult.Failed -> {
+                        sp.edit().putLong(KEY_NEXT_ATTEMPT, System.currentTimeMillis() + RETRY_BACKOFF_MS).apply()
+                        if (force || !failing) {
+                            EventLog.add(context, EventLevel.WARN, "ntfy delivery failed (${result.reason}); queued for retry")
+                        }
+                        failing = true
+                        return
+                    }
+                }
+            }
+        } finally {
+            flushing.set(false)
+            if (delivered > 0) {
+                EventLog.add(
+                    context,
+                    EventLevel.INFO,
+                    if (delivered == 1) "Sent 1 ntfy notification"
+                    else "Sent $delivered queued ntfy notifications"
+                )
+            }
+        }
+    }
+
+    private fun nextMessage(sp: android.content.SharedPreferences): JSONObject? = synchronized(queueLock) {
+        var array = readOutbox(sp)
+        val now = System.currentTimeMillis()
+        var changed = false
         while (array.length() > 0) {
             val item = array.optJSONObject(0)
-            if (item == null) {
-                array = drop(array)
-                continue
-            }
-            // Expired entries are discarded rather than retried forever.
-            if (now - item.optLong("at", now) > MAX_AGE_MS) {
-                array = drop(array)
-                continue
-            }
-            val ok = runCatching { publish(prefs, item) }.getOrDefault(false)
-            if (!ok) {
-                failed = true
-                break
-            }
-            delivered++
+            if (item != null && now - item.optLong("at", now) <= MAX_AGE_MS) break
             array = drop(array)
+            changed = true
         }
-
-        val editor = sp.edit().putString(KEY_OUTBOX, array.toString())
-        if (failed) {
-            editor.putLong(KEY_NEXT_ATTEMPT, now + RETRY_BACKOFF_MS)
-        } else {
-            editor.remove(KEY_NEXT_ATTEMPT)
+        val item = array.optJSONObject(0)
+        // Older releases did not assign IDs. Persist one before releasing the
+        // lock so an acknowledgement cannot erase a concurrently enqueued event.
+        if (item != null && !item.has("id")) {
+            item.put("id", UUID.randomUUID().toString())
+            changed = true
         }
-        editor.apply()
+        if (changed) sp.edit().putString(KEY_OUTBOX, array.toString()).apply()
+        item
+    }
 
-        if (delivered > 0) {
-            EventLog.add(
-                context,
-                EventLevel.INFO,
-                if (delivered == 1) "Sent 1 ntfy notification"
-                else "Sent $delivered queued ntfy notifications"
-            )
+    private fun acknowledge(sp: android.content.SharedPreferences, id: String) {
+        synchronized(queueLock) {
+            val current = readOutbox(sp)
+            val remaining = JSONArray()
+            for (i in 0 until current.length()) {
+                val item = current.optJSONObject(i) ?: continue
+                if (item.optString("id") != id) remaining.put(item)
+            }
+            sp.edit().putString(KEY_OUTBOX, remaining.toString()).apply()
         }
     }
 
@@ -139,33 +175,15 @@ object Ntfy {
 
     // ---------------------------------------------------------------- publish
 
-    /** @return true when ntfy accepted the message. */
-    private fun publish(prefs: Prefs, item: JSONObject): Boolean {
+    private fun request(prefs: Prefs, item: JSONObject): ReportingRequest {
         val base = prefs.ntfyUrl.trimEnd('/')
         val topic = prefs.ntfyTopic
-        val target = URL("$base/$topic")
-
-        val conn = (target.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = TIMEOUT_MS
-            readTimeout = TIMEOUT_MS
-            doOutput = true
-            setRequestProperty("Content-Type", "text/plain; charset=utf-8")
-            authHeader(prefs)?.let { setRequestProperty("Authorization", it) }
-            header("X-Title", item.optString("title"))?.let { setRequestProperty("X-Title", it) }
-            header("X-Tags", item.optString("tags"))?.let { setRequestProperty("X-Tags", it) }
-            val priority = item.optInt("priority", PRIORITY_DEFAULT)
-            setRequestProperty("X-Priority", priority.coerceIn(1, 5).toString())
-        }
-
-        return try {
-            conn.outputStream.use { out: OutputStream ->
-                out.write(body(item).toByteArray(Charsets.UTF_8))
-            }
-            conn.responseCode in 200..299
-        } finally {
-            runCatching { conn.disconnect() }
-        }
+        val headers = mutableMapOf<String, String>()
+        authHeader(prefs)?.let { headers["Authorization"] = it }
+        header("X-Title", item.optString("title"))?.let { headers["X-Title"] = it }
+        header("X-Tags", item.optString("tags"))?.let { headers["X-Tags"] = it }
+        headers["X-Priority"] = item.optInt("priority", PRIORITY_DEFAULT).coerceIn(1, 5).toString()
+        return ReportingRequest("$base/$topic", body(item), headers)
     }
 
     /**

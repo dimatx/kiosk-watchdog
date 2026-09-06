@@ -182,6 +182,7 @@ class WatchdogService : Service() {
         State.lastCheckAt = now
         State.wifi = probe.status()
         State.online = reachable
+        Reporting.updateConnectivity(reachable)
         val label = describeTarget(this, target)
         lastTargetLabel = label
 
@@ -201,10 +202,9 @@ class WatchdogService : Service() {
                 if (State.reportedLost) report("recovered", downFor)
             }
             // The link is up: this is the only moment queued notifications can go out.
-            Ntfy.flush(this)
-            // Heartbeats are deliberately never queued — silence is what makes the
-            // monitor on the other end raise the alarm.
-            Heartbeat.maybePing(this, prefs, rttMs)
+            // Independent reporters cannot delay this tick or one another.
+            // Automatic heartbeats are skipped, not queued, while a send is busy.
+            Reporting.onHealthyProbe(this, rttMs)
             prefs.lastGoodAtMillis = now
             State.consecutiveFailures = 0
             State.stage = 0
@@ -521,7 +521,7 @@ class WatchdogService : Service() {
         }
         EventLog.add(this, EventLevel.ACTION, getString(R.string.log_ntfy_test))
         report("test", 0)
-        Ntfy.flush(this, force = true)
+        Reporting.testNotification(this)
     }
 
     private fun sendTestHeartbeat() {
@@ -530,7 +530,7 @@ class WatchdogService : Service() {
             return
         }
         EventLog.add(this, EventLevel.ACTION, getString(R.string.log_heartbeat_test))
-        Heartbeat.pingNow(this, prefs, 0)
+        Reporting.testHeartbeat(this)
     }
 
     // ------------------------------------------------------------- scheduling

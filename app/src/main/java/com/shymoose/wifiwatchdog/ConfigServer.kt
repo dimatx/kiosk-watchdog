@@ -9,15 +9,11 @@ import android.provider.Settings
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
-import java.io.BufferedInputStream
-import java.io.InputStream
 import java.io.OutputStreamWriter
 import java.net.BindException
 import java.net.ServerSocket
-import java.net.Socket
 import java.net.URLDecoder
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import java.util.concurrent.locks.ReentrantLock
 import org.json.JSONObject
 
 /**
@@ -39,13 +35,8 @@ object ConfigServer {
     private val PORT_RANGE = 8080..8089
 
     @Volatile
-    private var server: ServerSocket? = null
-
-    @Volatile
-    private var workers: ExecutorService? = null
-
-    /** Enough to keep a browser's parallel connections moving, few enough to bound them. */
-    private const val WORKER_THREADS = 4
+    private var server: ConfigHttpTransport? = null
+    private val mutationLock = ReentrantLock()
 
     /** Readings returned by /vitals — a few hours at the default interval. */
     private const val VITALS_PAGE = 400
@@ -89,31 +80,32 @@ object ConfigServer {
             Log.w(TAG, "no free port in $PORT_RANGE")
             return
         }
-        server = socket
         port = socket.localPort
-        workers = Executors.newFixedThreadPool(WORKER_THREADS) { r ->
-            Thread(r, "config-server-worker").apply { isDaemon = true }
-        }
-        Thread({ serve(app, socket) }, "config-server").apply { isDaemon = true }.start()
+        val transport = ConfigHttpTransport(
+            socket,
+            // Exception messages can contain client input; log only the failure type.
+            onFailure = { Log.w(TAG, "connection failed: ${it.javaClass.simpleName}") },
+            mutationLock = mutationLock
+        ) { request, client -> handle(app, request, client) }
+        server = transport
+        transport.start()
         Log.i(TAG, "listening on $port")
     }
 
     @Synchronized
     fun stop() {
         handler.removeCallbacks(expiry)
-        val socket = server ?: return
+        val transport = server ?: return
         server = null
         port = 0
         expiresAtMillis = 0L
-        workers?.shutdownNow()
-        workers = null
-        // Unblocks accept(), which is how the serving thread learns to exit.
-        runCatching { socket.close() }
+        transport.close()
     }
 
-    private fun bind(): ServerSocket? {        for (candidate in PORT_RANGE) {
+    private fun bind(): ServerSocket? {
+        for (candidate in PORT_RANGE) {
             try {
-                return ServerSocket(candidate)
+                return ServerSocket(candidate, ConfigHttpTransport.WORKER_THREADS + ConfigHttpTransport.QUEUED_CLIENTS)
             } catch (_: BindException) {
                 // Port taken; try the next one.
             } catch (e: Exception) {
@@ -123,96 +115,27 @@ object ConfigServer {
         return null
     }
 
-    private fun serve(context: Context, socket: ServerSocket) {
-        while (true) {
-            val client = try {
-                socket.accept()
-            } catch (_: Exception) {
-                break // Closed by stop(), or the interface went away.
-            }
-            // Off the accept loop: browsers routinely open a speculative
-            // connection and send nothing on it, and handling inline meant that
-            // socket held up every other request until its read timed out.
-            val worker = workers
-            if (worker == null || worker.isShutdown) {
-                runCatching { client.close() }
-                break
-            }
-            runCatching {
-                worker.execute {
-                    runCatching { handle(context, client) }
-                        .onFailure { Log.w(TAG, "request failed", it) }
-                    runCatching { client.close() }
-                }
-            }.onFailure { runCatching { client.close() } }
-        }
-        Log.i(TAG, "stopped")
-    }
-
     // --------------------------------------------------------------- HTTP
-
-    /**
-     * Reads one CRLF-terminated line straight off the socket.
-     *
-     * Deliberately not a `BufferedReader`: a decoder pulls ahead into its own
-     * buffer, which would swallow the first bytes of the body before it can be
-     * read at its declared byte length.
-     */
-    private fun readLine(input: InputStream): String? {
-        val line = StringBuilder()
-        while (true) {
-            val c = input.read()
-            if (c < 0) return if (line.isEmpty()) null else line.toString()
-            if (c == '\n'.code) return line.toString().removeSuffix("\r")
-            line.append(c.toChar())
-        }
-    }
-
-    private fun handle(context: Context, client: Socket) {
-        client.soTimeout = 10_000
-        val input = BufferedInputStream(client.getInputStream())
-        val requestLine = readLine(input) ?: return
-        val parts = requestLine.split(' ')
-        if (parts.size < 2) return
-        val method = parts[0]
-        val target = parts[1]
+    private fun handle(context: Context, request: ConfigHttpRequest, client: ConfigHttpTransport.Connection) {
+        val method = request.method
+        val target = request.target
         val path = target.substringBefore('?')
         val query = if (target.contains('?')) parse(target.substringAfter('?')) else emptyMap()
 
-        var contentLength = 0
-        while (true) {
-            val header = readLine(input) ?: break
-            if (header.isEmpty()) break
-            if (header.startsWith("Content-Length:", ignoreCase = true)) {
-                contentLength = header.substringAfter(':').trim().toIntOrNull() ?: 0
-            }
-        }
-
-        // Content-Length counts bytes. Reading that many *characters* through a
-        // decoder works only while the body is ASCII, and /import takes arbitrary
-        // JSON — a single non-ASCII character left the read waiting for input that
-        // was never coming, until the socket timed out and the body was truncated.
-        val body = if (method == "POST" && contentLength > 0) {
-            val buffer = ByteArray(contentLength)
-            var read = 0
-            while (read < contentLength) {
-                val n = input.read(buffer, read, contentLength - read)
-                if (n < 0) break
-                read += n
-            }
-            String(buffer, 0, read, Charsets.UTF_8)
-        } else ""
-
-        val out = OutputStreamWriter(client.getOutputStream(), Charsets.UTF_8)
+        val body = request.body
+        val out = OutputStreamWriter(client.socket.getOutputStream(), Charsets.UTF_8)
         when {
             method == "POST" && path == "/save" -> {
-                val message = save(context, parse(body))
+                val form = parse(body)
+                val message = client.whileActive { save(context, form) } ?: return
                 redirect(out, message)
             }
 
             method == "POST" && path == "/field" -> {
                 val form = parse(body)
-                val result = field(context, form["k"].orEmpty(), form["v"].orEmpty())
+                val result = client.whileActive {
+                    field(context, form["k"].orEmpty(), form["v"].orEmpty())
+                } ?: return
                 val bytes = result.toByteArray(Charsets.UTF_8).size
                 out.write(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n" +
@@ -223,7 +146,8 @@ object ConfigServer {
             }
 
             method == "POST" && path == "/action" -> {
-                val message = action(context, parse(body)["a"].orEmpty())
+                val which = parse(body)["a"].orEmpty()
+                val message = client.whileActive { action(context, which) } ?: return
                 redirect(out, message)
             }
 
@@ -249,7 +173,8 @@ object ConfigServer {
                 // curl posts raw JSON; the browser form posts it urlencoded in "json".
                 val trimmed = body.trimStart()
                 val raw = if (trimmed.startsWith("{")) trimmed else parse(body)["json"].orEmpty()
-                redirect(out, importJson(context, raw))
+                val message = client.whileActive { importJson(context, raw) } ?: return
+                redirect(out, message)
             }
 
             path == "/export" -> {
@@ -430,6 +355,9 @@ object ConfigServer {
         return when (field.kind) {
             Kind.BOOL -> {
                 val on = parseBool(value) ?: return rejectBool(key, value)
+                if (on && key == Prefs.KEY_RESTORE_NETWORK_ADB) {
+                    NetworkAdb.unavailableReason(context)?.let { return Written.Rejected(it) }
+                }
                 editor.putBoolean(key, on)
                 Written.Applied
             }
@@ -469,6 +397,9 @@ object ConfigServer {
         }
 
         for (field in FIELDS) {
+            if (field.key == Prefs.KEY_RESTORE_NETWORK_ADB && !form.containsKey(field.key) &&
+                NetworkAdb.unavailableReason(context) != null
+            ) continue // Disabled HTML controls are omitted; preserve their stored value.
             when (field.kind) {
                 // An unchecked box is simply absent from the body, and the form
                 // always renders every field, so absence means false.
@@ -656,6 +587,12 @@ object ConfigServer {
                     Prefs.KEY_KEEP_BT_OFF, "Keep Bluetooth off", Kind.BOOL,
                     "Bluetooth shares a chip with Wi-Fi; scanning competes with the link.",
                     Prefs.DEFAULT_KEEP_BT_OFF.toString()
+                ),
+                Field(
+                    Prefs.KEY_RESTORE_NETWORK_ADB, "Restore network ADB after reboot", Kind.BOOL,
+                    "LineageOS only. Port 5555 after boot; use a trusted network. USB debugging " +
+                        "and ADB authentication unchanged. Off prevents future restores only.",
+                    Prefs.DEFAULT_RESTORE_NETWORK_ADB.toString()
                 )
             )
         ),
@@ -783,10 +720,16 @@ object ConfigServer {
                 for (field in section.fields) {
                     sb.append(
                         when (field.kind) {
-                            Kind.BOOL -> checkbox(
-                                field.key, field.label,
-                                sp.getBoolean(field.key, field.def == "true"), field.hint
-                            )
+                            Kind.BOOL -> {
+                                val reason = if (field.key == Prefs.KEY_RESTORE_NETWORK_ADB) {
+                                    NetworkAdb.unavailableReason(context)
+                                } else null
+                                checkbox(
+                                    field.key, field.label,
+                                    sp.getBoolean(field.key, field.def == "true"), reason ?: field.hint,
+                                    enabled = reason == null
+                                )
+                            }
 
                             Kind.PASSWORD -> password(field)
                             else -> text(
@@ -861,9 +804,12 @@ object ConfigServer {
             .append(field.key).append("_clear\"><span>Clear the stored value</span></label>")
     }
 
-    private fun checkbox(key: String, label: String, checked: Boolean, hint: String): String = buildString {
+    private fun checkbox(
+        key: String, label: String, checked: Boolean, hint: String, enabled: Boolean = true
+    ): String = buildString {
         append("<label class=\"check\"><input type=\"checkbox\" name=\"").append(key).append("\"")
         if (checked) append(" checked")
+        if (!enabled) append(" disabled")
         append("><span>").append(esc(label)).append("</span></label>")
         if (hint.isNotEmpty()) append("<small class=\"under\">").append(esc(hint)).append("</small>")
     }

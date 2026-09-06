@@ -180,4 +180,8 @@
     <string name="pref_auto_install_test">Run a self-test</string>
     <string name="pref_auto_install_test_summary">Offers this app its own update so the install dialog appears, then confirms it automatically. Nothing is actually changed — the APK is identical to the one already installed.</string>
     <string name="toast_auto_install_test">Self-test started — the dialog should confirm itself</string>
+    <string name="pref_network_adb">Restore network ADB after reboot</string>
+    <string name="pref_network_adb_summary">Off by default. On LineageOS, requests network debugging on port 5555 after boot (preserves an existing network port). Use only on a trusted network. USB debugging and ADB authentication remain unchanged. Turning this off prevents future restoration; it does not close an existing listener.</string>
+    <string name="pref_network_adb_unsupported">Unavailable: requires the native LineageOS settings provider. Not supported on stock Android or Fire OS.</string>
+    <string name="pref_network_adb_needs_grant">Requires a separate one-time adb grant: adb shell pm grant %1$s lineageos.permission.WRITE_SECURE_SETTINGS</string>
 </resources>

@@ -66,6 +66,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
      * controls are disabled rather than left looking operable.
      */
     private fun disableUnavailable() {
+        findPreference<Preference>(Prefs.KEY_RESTORE_NETWORK_ADB)?.apply {
+            val reason = NetworkAdb.unavailableReason(requireContext())
+            isEnabled = reason == null
+            summary = reason ?: getString(R.string.pref_network_adb_summary)
+        }
         if (AirplaneMode.hasPermission(requireContext())) return
 
         val reason = getString(R.string.pref_needs_adb)
