@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal object Reporting {
     private val notifications = ReportingLane("watchdog-ntfy")
     private val heartbeats = ReportingLane("watchdog-heartbeat")
+    private val logs = ReportingLane("watchdog-otlp")
     private val online = AtomicBoolean(false)
 
     fun updateConnectivity(reachable: Boolean) {
@@ -28,6 +29,11 @@ internal object Reporting {
                 if (online.get() && prefs.enabled) Heartbeat.maybePing(app, prefs, rttMs)
             }
         }
+        if (prefs.otlpConfigured) logs.submit {
+            withWakeLock(app) {
+                if (online.get() && Prefs(app).enabled) OtlpLogExporter.flush(app)
+            }
+        }
     }
 
     fun testNotification(context: Context) {
@@ -41,6 +47,13 @@ internal object Reporting {
         val app = context.applicationContext
         if (!heartbeats.submit(manual = true) { withWakeLock(app) { Heartbeat.pingNow(app, Prefs(app), 0) } }) {
             EventLog.add(app, EventLevel.WARN, "Heartbeat delivery is busy; test not queued, try again shortly")
+        }
+    }
+
+    fun testOtlp(context: Context) {
+        val app = context.applicationContext
+        if (!logs.submit(manual = true) { withWakeLock(app) { OtlpLogExporter.sendTest(app) } }) {
+            EventLog.add(app, EventLevel.WARN, "Central log export is busy; try again shortly")
         }
     }
 

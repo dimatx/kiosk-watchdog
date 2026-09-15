@@ -87,6 +87,19 @@
                 app:summary="@string/pref_airplane_dwell_summary"
                 app:title="@string/pref_airplane_dwell" />
         </PreferenceCategory>
+
+        <PreferenceCategory app:title="@string/cat_reboot">
+            <SwitchPreferenceCompat
+                app:defaultValue="false"
+                app:key="reboot_enabled"
+                app:summary="@string/pref_reboot_enabled_summary"
+                app:title="@string/pref_reboot_enabled" />
+            <EditTextPreference
+                app:defaultValue="3"
+                app:key="reboot_after_cycles"
+                app:summary="@string/pref_reboot_after_cycles_summary"
+                app:title="@string/pref_reboot_after_cycles" />
+        </PreferenceCategory>
     </PreferenceScreen>
 
     <PreferenceScreen
@@ -170,6 +183,26 @@
                 app:key="heartbeat_test"
                 app:summary="@string/pref_heartbeat_test_summary"
                 app:title="@string/pref_heartbeat_test" />
+        </PreferenceCategory>
+
+        <PreferenceCategory app:title="@string/cat_otlp">
+            <EditTextPreference
+                app:key="otlp_endpoint"
+                app:summary="@string/pref_otlp_endpoint_summary"
+                app:title="@string/pref_otlp_endpoint" />
+            <EditTextPreference
+                app:key="otlp_auth_header"
+                app:summary="@string/pref_otlp_auth_summary"
+                app:title="@string/pref_otlp_auth" />
+            <EditTextPreference
+                app:defaultValue="android"
+                app:key="otlp_stream_name"
+                app:summary="@string/pref_otlp_stream_summary"
+                app:title="@string/pref_otlp_stream" />
+            <Preference
+                app:key="otlp_test"
+                app:summary="@string/pref_otlp_test_summary"
+                app:title="@string/pref_otlp_test" />
         </PreferenceCategory>
     </PreferenceScreen>
 </androidx.preference.PreferenceScreen>

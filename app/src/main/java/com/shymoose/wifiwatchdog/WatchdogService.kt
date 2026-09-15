@@ -74,9 +74,15 @@ class WatchdogService : Service() {
                 forceAirplaneCycle()
             }
 
+            ACTION_FORCE_REBOOT -> runOnWorker(coalesce = false) {
+                forceReboot()
+            }
+
             ACTION_SEND_TEST -> runOnWorker(coalesce = false) { sendTestNotification() }
 
             ACTION_SEND_HEARTBEAT -> runOnWorker(coalesce = false) { sendTestHeartbeat() }
+
+            ACTION_SEND_OTLP_TEST -> runOnWorker(coalesce = false) { sendTestOtlp() }
 
             else -> {
                 if (State.startedAt == 0L) {
@@ -208,6 +214,7 @@ class WatchdogService : Service() {
             prefs.lastGoodAtMillis = now
             State.consecutiveFailures = 0
             State.stage = 0
+            State.airplaneCycleAttempts = 0
             State.reportedLost = false
             State.backoffSec = INITIAL_BACKOFF_SEC
             State.nextHardResetAt = 0L
@@ -367,13 +374,24 @@ class WatchdogService : Service() {
                 // actually brought this device back when nothing else did.
                 val completed = act(downSec) { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
                 State.stage = 4
+                State.airplaneCycleAttempts = 1
                 State.backoffSec = INITIAL_BACKOFF_SEC
                 State.nextHardResetAt = now + State.backoffSec * 1000L
                 report("airplane_cycle", downSec, completed)
             }
 
             else -> if (now >= State.nextHardResetAt) {
+                if (rebootUsable() && State.airplaneCycleAttempts >= prefs.rebootAfterCycles) {
+                    val completed = act(downSec) { recovery.reboot() }
+                    report("reboot", downSec, completed)
+                    if (completed) return
+                    // The reboot request itself failed (dialog never opened, or
+                    // Restart could not be found) - the process is still alive,
+                    // so fall through to another airplane cycle rather than
+                    // leaving the device to sit there having done nothing.
+                }
                 val completed = act(downSec) { if (airplaneUsable()) recovery.airplaneCycle() else lastResortReset() }
+                State.airplaneCycleAttempts++
                 val ceiling = if (blind) BLIND_MAX_BACKOFF_SEC else MAX_BACKOFF_SEC
                 State.backoffSec = (State.backoffSec * 2).coerceAtMost(ceiling)
                 State.nextHardResetAt = now + State.backoffSec * 1000L
@@ -421,6 +439,14 @@ class WatchdogService : Service() {
     private fun airplaneUsable(): Boolean = prefs.airplaneEnabled && AirplaneMode.isAvailable(this)
 
     /**
+     * Reboot needs the install-auto-click accessibility service bound, since
+     * that is what drives the power menu. [Prefs.rebootEnabled] is the user's
+     * own attestation that this device keeps network adb after a reboot -
+     * nothing here can verify that.
+     */
+    private fun rebootUsable(): Boolean = prefs.rebootEnabled && InstallAutoClickService.bound != null
+
+    /**
      * Hard reset needs WRITE_SECURE_SETTINGS to unload the driver. On a device
      * that was never set up over adb it can never work, so check here instead of
      * letting [WifiRecovery.hardReset] warn about it on every single escalation.
@@ -443,6 +469,15 @@ class WatchdogService : Service() {
             return
         }
         recovery.airplaneCycle()
+    }
+
+    private fun forceReboot() {
+        EventLog.add(this, EventLevel.ACTION, "Manual reboot triggered")
+        if (InstallAutoClickService.bound == null) {
+            EventLog.add(this, EventLevel.ERROR, "Reboot needs the install auto-click accessibility service bound")
+            return
+        }
+        recovery.reboot()
     }
 
     // -------------------------------------------------------- ntfy reporting
@@ -471,6 +506,11 @@ class WatchdogService : Service() {
                 getString(R.string.ntfy_title_airplane),
                 Ntfy.PRIORITY_URGENT,
                 "rotating_light"
+            )
+            "reboot" -> Triple(
+                getString(R.string.ntfy_title_reboot),
+                Ntfy.PRIORITY_URGENT,
+                "arrows_counterclockwise"
             )
             "recovered" -> Triple(
                 getString(R.string.ntfy_title_recovered),
@@ -531,6 +571,15 @@ class WatchdogService : Service() {
         }
         EventLog.add(this, EventLevel.ACTION, getString(R.string.log_heartbeat_test))
         Reporting.testHeartbeat(this)
+    }
+
+    private fun sendTestOtlp() {
+        if (!prefs.otlpConfigured) {
+            EventLog.add(this, EventLevel.ERROR, getString(R.string.log_otlp_unconfigured))
+            return
+        }
+        EventLog.add(this, EventLevel.ACTION, getString(R.string.log_otlp_test))
+        Reporting.testOtlp(this)
     }
 
     // ------------------------------------------------------------- scheduling
@@ -612,6 +661,7 @@ class WatchdogService : Service() {
         var online: Boolean = true
         var consecutiveFailures: Int = 0
         var stage: Int = 0
+        var airplaneCycleAttempts: Int = 0
         var backoffSec: Int = INITIAL_BACKOFF_SEC
         var nextHardResetAt: Long = 0L
         var wifi: WifiStatus? = null
@@ -666,8 +716,10 @@ class WatchdogService : Service() {
         const val ACTION_STOP = "com.shymoose.wifiwatchdog.STOP"
         const val ACTION_FORCE_HARD_RESET = "com.shymoose.wifiwatchdog.FORCE_HARD_RESET"
         const val ACTION_FORCE_AIRPLANE = "com.shymoose.wifiwatchdog.FORCE_AIRPLANE"
+        const val ACTION_FORCE_REBOOT = "com.shymoose.wifiwatchdog.FORCE_REBOOT"
         const val ACTION_SEND_TEST = "com.shymoose.wifiwatchdog.SEND_TEST"
         const val ACTION_SEND_HEARTBEAT = "com.shymoose.wifiwatchdog.SEND_HEARTBEAT"
+        const val ACTION_SEND_OTLP_TEST = "com.shymoose.wifiwatchdog.SEND_OTLP_TEST"
 
         private const val CHANNEL_ID = "watchdog"
         private const val NOTIFICATION_ID = 1001
@@ -727,6 +779,12 @@ class WatchdogService : Service() {
         fun forceAirplaneCycle(context: Context) {
             val intent = Intent(context, WatchdogService::class.java)
                 .setAction(ACTION_FORCE_AIRPLANE)
+            context.startForegroundService(intent)
+        }
+
+        fun forceReboot(context: Context) {
+            val intent = Intent(context, WatchdogService::class.java)
+                .setAction(ACTION_FORCE_REBOOT)
             context.startForegroundService(intent)
         }
 

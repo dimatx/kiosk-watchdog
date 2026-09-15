@@ -133,6 +133,7 @@
     <string name="ntfy_title_lost">Wi-Fi down</string>
     <string name="ntfy_title_hard_reset">Wi-Fi driver reset</string>
     <string name="ntfy_title_airplane">Airplane-mode cycle</string>
+    <string name="ntfy_title_reboot">Device reboot</string>
     <string name="ntfy_title_recovered">Wi-Fi restored</string>
     <string name="ntfy_title_recovery_failed">Wi-Fi recovery attempt failed</string>
     <string name="ntfy_line_recovery_failed">Action: %1$s. The required radio state change was not confirmed; see the device activity log.</string>
@@ -161,6 +162,19 @@
     <string name="log_heartbeat_unconfigured">Set a heartbeat URL first</string>
     <string name="toast_heartbeat_test">Heartbeat sent — check the event log</string>
 
+    <string name="cat_otlp">Central log export (OTLP)</string>
+    <string name="pref_otlp_endpoint">Endpoint</string>
+    <string name="pref_otlp_endpoint_summary">Optional. Root URL of an OTLP/HTTP logs receiver — Vector, an OpenTelemetry Collector, or OpenObserve (e.g. https://host:5080/api/default). \"/v1/logs\" is appended automatically. Blank disables export.</string>
+    <string name="pref_otlp_auth">Authorization header</string>
+    <string name="pref_otlp_auth_summary">Optional. Sent verbatim, e.g. \"Bearer &lt;token&gt;\" for a collector or \"Basic &lt;base64&gt;\" for OpenObserve.</string>
+    <string name="pref_otlp_stream">Stream name</string>
+    <string name="pref_otlp_stream_summary">Sent as the OpenObserve \"stream-name\" header. Ignored by receivers that don\'t use it.</string>
+    <string name="pref_otlp_test">Send test log entry</string>
+    <string name="pref_otlp_test_summary">Sends one entry straight away and records the result in the event log.</string>
+    <string name="log_otlp_test">Test log entry sent</string>
+    <string name="log_otlp_unconfigured">Set an OTLP endpoint first</string>
+    <string name="toast_otlp_test">Test sent — check the event log</string>
+
     <string name="cat_auto_install">App update auto-confirm</string>
     <string name="a11y_install_label">Kiosk Watchdog install auto-confirm</string>
     <!-- Only ever used when the system has permanently blocked the entry above; named
@@ -184,4 +198,10 @@
     <string name="pref_network_adb_summary">Off by default. On LineageOS, requests network debugging on port 5555 after boot (preserves an existing network port). Use only on a trusted network. USB debugging and ADB authentication remain unchanged. Turning this off prevents future restoration; it does not close an existing listener.</string>
     <string name="pref_network_adb_unsupported">Unavailable: requires the native LineageOS settings provider. Not supported on stock Android or Fire OS.</string>
     <string name="pref_network_adb_needs_grant">Requires a separate one-time adb grant: adb shell pm grant %1$s lineageos.permission.WRITE_SECURE_SETTINGS</string>
+
+    <string name="cat_reboot">Reboot recovery (last resort)</string>
+    <string name="pref_reboot_enabled">Allow reboot recovery</string>
+    <string name="pref_reboot_enabled_summary">Off by default. Only turn this on for a device you have confirmed keeps network ADB over TCP after a reboot on its own — otherwise a reboot that does not fix the fault permanently strands the device. Uses the power menu\'s \"Restart\" option via the install auto-click accessibility service, not the physical power button.</string>
+    <string name="pref_reboot_after_cycles">Reboot after (failed airplane cycles)</string>
+    <string name="pref_reboot_after_cycles_summary">How many consecutive failed airplane-mode cycles to allow before escalating to a full reboot.</string>
 </resources>

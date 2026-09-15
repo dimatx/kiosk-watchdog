@@ -36,8 +36,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
             Prefs.KEY_NTFY_USER,
             Prefs.KEY_HEARTBEAT_URL,
             Prefs.KEY_HEARTBEAT_INTERVAL,
+            Prefs.KEY_OTLP_ENDPOINT,
+            Prefs.KEY_OTLP_STREAM,
             Prefs.KEY_AUTO_INSTALL_ALLOWLIST
-            // Deliberately not the password — the summary is rendered on screen.
+            // Deliberately not the password or the OTLP auth header — the summary is rendered on screen.
         ).forEach { key ->
             findPreference<EditTextPreference>(key)?.summaryProvider =
                 EditTextPreference.SimpleSummaryProvider.getInstance()
@@ -52,6 +54,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
         explained(Prefs.KEY_T_HARD, R.string.pref_t_hard_summary, Prefs.DEFAULT_T_HARD)
 
         findPreference<EditTextPreference>(Prefs.KEY_NTFY_PASSWORD)?.setOnBindEditTextListener {
+            it.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            it.setSelection(it.text?.length ?: 0)
+        }
+
+        findPreference<EditTextPreference>(Prefs.KEY_OTLP_AUTH)?.setOnBindEditTextListener {
             it.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             it.setSelection(it.text?.length ?: 0)
         }
@@ -126,6 +133,16 @@ class SettingsFragment : PreferenceFragmentCompat() {
                     .setAction(WatchdogService.ACTION_SEND_HEARTBEAT)
             )
             Toast.makeText(context, R.string.toast_heartbeat_test, Toast.LENGTH_SHORT).show()
+            return true
+        }
+        if (preference.key == Prefs.KEY_OTLP_TEST) {
+            val context = requireContext()
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, WatchdogService::class.java)
+                    .setAction(WatchdogService.ACTION_SEND_OTLP_TEST)
+            )
+            Toast.makeText(context, R.string.toast_otlp_test, Toast.LENGTH_SHORT).show()
             return true
         }
         if (preference.key == Prefs.KEY_AUTO_INSTALL_SETUP) {

@@ -50,6 +50,9 @@ contain no real network addresses, Wi-Fi names, credentials, or notification URL
 - 📮 **Push alerts that survive the outage.** Notifications are queued while the link is
   down and flushed on recovery, with their original timestamps intact.
 - 💓 **Heartbeat webhook** for Uptime Kuma or anything else that accepts a `GET`.
+- 📊 **Central log export (OTLP)** — ships the on-device activity log to Vector, an
+  OpenTelemetry Collector, or OpenObserve as plain OTLP/HTTP JSON. Optional and off by
+  default. [More ↓](#central-log-export-otlp)
 - 🖥️ **Configure it from your desktop browser.** A tabbed setup page runs on the device
   for five minutes after you open the app — no on-screen keyboard required.
   [More ↓](#browser-setup-page)
@@ -289,12 +292,16 @@ probes start failing, a timer runs and recovery escalates:
 | 120s | Soft toggle | Wi-Fi off, Wi-Fi on |
 | 240s | Hard reset | Sets `wifi_scan_always_enabled=0`, toggles Wi-Fi, restores it — this genuinely unloads the driver and re-enumerates `wlan0` |
 | 360s | Airplane cycle | Real airplane mode on, dwell, off |
+| N failed airplane cycles | Reboot *(opt-in, off by default)* | Full device reboot via the power menu's "Restart" |
 
 If the link is still down after all four, it backs off — preferring the airplane cycle,
 doubling the gap from 5 minutes to a 30-minute cap. Every action lands in the on-device
 activity log.
 
-All thresholds are configurable, and the airplane rung can be disabled entirely.
+All thresholds are configurable, and the airplane and reboot rungs can each be disabled
+entirely. Reboot is the true last resort: it's off by default, and only worth enabling
+on a device confirmed to bring network ADB back on its own after a reboot — otherwise a
+reboot that doesn't fix the underlying fault permanently strands the display.
 
 ### Why the gateway is the probe target
 
@@ -436,11 +443,47 @@ Only transitions are logged, so a long outage can't flood the event log.
 
 ---
 
+## Central log export (OTLP)
+
+Optional, and independent of ntfy and the heartbeat. Ships the on-device activity log
+(the same entries the on-device event log shows) to a central OTLP/HTTP logs endpoint —
+[Vector](https://vector.dev)'s `opentelemetry` source, an OpenTelemetry Collector, or
+[OpenObserve](https://openobserve.ai/). No OTLP SDK or protobuf dependency: the wire
+format all three accept at `/v1/logs` is plain JSON, built with the same `org.json` this
+app already uses everywhere else.
+
+Three settings, all optional:
+
+- **Endpoint** — the root URL, e.g. `https://host:5080/api/default` for OpenObserve or
+  `https://host:4318` for Vector/a Collector. `/v1/logs` is appended automatically.
+  Blank disables export.
+- **Authorization header** — sent verbatim, e.g. `Bearer <token>` for a collector or
+  `Basic <base64>` for OpenObserve. Blank sends none.
+- **Stream name** — sent as the OpenObserve-specific `stream-name` header so exports
+  land in one stream instead of `default`. Harmless on any other receiver, which just
+  ignores a header it doesn't recognise. Defaults to `android`.
+
+Each device is identified by resource attributes on every export: `hostname`,
+`source_ip` and `mac` (matching the field names this project's own OpenObserve
+deployment already uses for its syslog-sourced streams, rather than OTel's dotted
+`host.name`/etc.), plus `service.name`/`service.version`. All four event severities
+(`INFO`, `ACTION`, `WARN`, `ERROR`) map to distinct OTLP severity numbers and are
+carried through as-is in `severityText`.
+
+Export is cursor-based rather than a separate outbox: a persisted sequence number
+tracks the last event successfully sent, so nothing is duplicated or lost across a
+restart. Failures retry on the next healthy probe, and — like the heartbeat and ntfy
+reporters — only log a transition, so a persistent outage can't flood the very log
+being exported.
+
+---
+
 ## Settings
 
 Probe host (blank = follow the gateway) and port · check interval · the four escalation
-thresholds · airplane dwell time · whether the airplane rung is allowed at all · ntfy
-server, topic and credentials · heartbeat URL and interval.
+thresholds · airplane dwell time · whether the airplane rung is allowed at all ·
+opt-in reboot rung and its failed-cycle threshold · ntfy server, topic and credentials ·
+heartbeat URL and interval · OTLP endpoint, auth header and stream name.
 
 Editable either on-device (overflow → **Settings**) or from your desktop via the
 [browser setup page](#browser-setup-page).

@@ -166,6 +166,43 @@ class Prefs(context: Context) {
         get() = sp.getLong(KEY_HEARTBEAT_LAST, 0L)
         set(value) = sp.edit().putLong(KEY_HEARTBEAT_LAST, value).apply()
 
+    /**
+     * Root OTLP/HTTP endpoint (e.g. `https://vector.example.com:4318` or an
+     * OpenObserve `https://host:5080/api/<org>`). Blank disables central log
+     * export. `/v1/logs` is appended when sending, matching how every OTLP SDK
+     * treats `OTEL_EXPORTER_OTLP_ENDPOINT` — so this is whatever value that
+     * variable would hold for the same backend.
+     */
+    val otlpEndpoint: String
+        get() = sp.getString(KEY_OTLP_ENDPOINT, "")!!.trim()
+
+    /**
+     * Sent verbatim as the `Authorization` header, e.g. `Bearer <token>` for a
+     * collector or `Basic <base64>` for OpenObserve. Not parsed or validated,
+     * since the right scheme depends entirely on the backend. Blank sends none.
+     */
+    val otlpAuthHeader: String
+        get() = sp.getString(KEY_OTLP_AUTH, "")!!.trim()
+
+    /**
+     * Sent as the OpenObserve-specific `stream-name` header so exported entries
+     * land in one stream instead of `default`. Harmless on any other OTLP
+     * receiver, which simply ignores an HTTP header it does not recognise.
+     */
+    val otlpStreamName: String
+        get() = sp.getString(KEY_OTLP_STREAM, DEFAULT_OTLP_STREAM)!!.trim()
+
+    val otlpConfigured: Boolean
+        get() = otlpEndpoint.startsWith("http", ignoreCase = true)
+
+    /**
+     * Sequence number ([LogEvent.seq]) of the newest event already exported.
+     * Export resumes strictly after it, so a restart cannot re-send or skip.
+     */
+    var otlpLastExportedSeq: Long
+        get() = sp.getLong(KEY_OTLP_LAST_SEQ, 0L)
+        set(value) = sp.edit().putLong(KEY_OTLP_LAST_SEQ, value).apply()
+
     /** Whether the accessibility service may confirm package-installer dialogs. */
     val autoInstallEnabled: Boolean
         get() = sp.getBoolean(KEY_AUTO_INSTALL_ENABLED, DEFAULT_AUTO_INSTALL_ENABLED)
@@ -183,6 +220,20 @@ class Prefs(context: Context) {
     /** Only LineageOS, and only after an explicit opt-in and separate adb grant. */
     val restoreNetworkAdb: Boolean
         get() = sp.getBoolean(KEY_RESTORE_NETWORK_ADB, DEFAULT_RESTORE_NETWORK_ADB)
+
+    /**
+     * Final rung: a full device reboot, driven through the power menu via
+     * accessibility. Off by default. Only turn this on for a device where
+     * network adb over TCP has been confirmed to survive a reboot on its own
+     * (e.g. LineageOS's native `adb_port` secure setting) - otherwise a reboot
+     * that does not fix the underlying fault permanently strands the device.
+     */
+    val rebootEnabled: Boolean
+        get() = sp.getBoolean(KEY_REBOOT_ENABLED, DEFAULT_REBOOT_ENABLED)
+
+    /** How many failed airplane cycles in a row before escalating to a reboot. */
+    val rebootAfterCycles: Int
+        get() = intPref(KEY_REBOOT_AFTER_CYCLES, DEFAULT_REBOOT_AFTER_CYCLES, 1, 20)
 
     /** Package to put back in front; blank turns the behaviour off. */
     val kioskPackage: String
@@ -227,9 +278,15 @@ class Prefs(context: Context) {
         const val KEY_HEARTBEAT_URL = "heartbeat_url"
         const val KEY_HEARTBEAT_INTERVAL = "heartbeat_interval_sec"
         const val KEY_HEARTBEAT_TEST = "heartbeat_test"
+        const val KEY_OTLP_ENDPOINT = "otlp_endpoint"
+        const val KEY_OTLP_AUTH = "otlp_auth_header"
+        const val KEY_OTLP_STREAM = "otlp_stream_name"
+        const val KEY_OTLP_TEST = "otlp_test"
         const val KEY_AUTO_INSTALL_ENABLED = "auto_install_enabled"
         const val KEY_KEEP_BT_OFF = "keep_bluetooth_off"
         const val KEY_RESTORE_NETWORK_ADB = "restore_network_adb"
+        const val KEY_REBOOT_ENABLED = "reboot_enabled"
+        const val KEY_REBOOT_AFTER_CYCLES = "reboot_after_cycles"
         const val KEY_KIOSK_PACKAGE = "kiosk_package"
         const val KEY_KIOSK_RETURN_MIN = "kiosk_return_after_min"
         const val KEY_AUTO_INSTALL_ALLOWLIST = "auto_install_allowlist"
@@ -246,6 +303,7 @@ class Prefs(context: Context) {
         private const val KEY_LAST_GATEWAY = "last_gateway"
         private const val KEY_LAST_IP = "last_ip"
         private const val KEY_LAST_MAC = "last_mac"
+        private const val KEY_OTLP_LAST_SEQ = "otlp_last_exported_seq"
 
         /** Empty on purpose: auto-follow the gateway unless the user pins a host. */
         const val DEFAULT_HOST = ""
@@ -266,6 +324,9 @@ class Prefs(context: Context) {
          */
         const val DEFAULT_HEARTBEAT_INTERVAL = 120
 
+        /** This project targets Android kiosks, so that's the sensible default stream. */
+        const val DEFAULT_OTLP_STREAM = "android"
+
         /** The one app on these displays that self-updates and blocks on a tap. */
         const val DEFAULT_AUTO_INSTALL_ALLOWLIST = "Kiosk Satellite"
 
@@ -280,6 +341,8 @@ class Prefs(context: Context) {
         /** Off by default: a display that genuinely uses Bluetooth should keep it. */
         const val DEFAULT_KEEP_BT_OFF = false
         const val DEFAULT_RESTORE_NETWORK_ADB = false
+        const val DEFAULT_REBOOT_ENABLED = false
+        const val DEFAULT_REBOOT_AFTER_CYCLES = 3
 
         /**
          * Harmless when absent - the feature checks the package is installed - so

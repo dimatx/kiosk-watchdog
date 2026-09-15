@@ -13,7 +13,9 @@ enum class EventLevel { INFO, WARN, ACTION, ERROR }
 data class LogEvent(
     val timestamp: Long,
     val level: EventLevel,
-    val message: String
+    val message: String,
+    /** Monotonic, assigned on write. Lets an exporter resume after the last entry it sent. */
+    val seq: Long = 0
 ) {
     fun formattedTime(): String =
         // Built per call rather than held in a static: a device that changes locale
@@ -30,6 +32,7 @@ object EventLog {
 
     private const val PREFS = "event_log"
     private const val KEY = "events"
+    private const val KEY_SEQ = "seq_counter"
     private const val MAX_EVENTS = 250
     private const val TAG = "WifiWatchdog"
 
@@ -55,11 +58,13 @@ object EventLog {
     private fun append(context: Context, level: EventLevel, message: String) {
         val sp = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val array = readArray(sp.getString(KEY, null))
+        val seq = sp.getLong(KEY_SEQ, 0L) + 1
 
         val obj = JSONObject().apply {
             put("t", System.currentTimeMillis())
             put("l", level.name)
             put("m", message)
+            put("s", seq)
         }
         array.put(obj)
 
@@ -76,7 +81,7 @@ object EventLog {
         // that freezes loses whatever had not landed - which is reliably the
         // handful of entries that would have explained it. Routine chatter stays
         // asynchronous so the common path is not paying for this.
-        val editor = sp.edit().putString(KEY, trimmed.toString())
+        val editor = sp.edit().putString(KEY, trimmed.toString()).putLong(KEY_SEQ, seq)
         if (level == EventLevel.INFO) editor.apply() else editor.commit()
     }
 
@@ -91,11 +96,38 @@ object EventLog {
                 LogEvent(
                     timestamp = o.optLong("t"),
                     level = runCatching { EventLevel.valueOf(o.optString("l")) }.getOrDefault(EventLevel.INFO),
-                    message = o.optString("m")
+                    message = o.optString("m"),
+                    seq = o.optLong("s")
                 )
             )
         }
         out.reverse()
+        return out
+    }
+
+    /**
+     * Oldest first, strictly after [afterSeq], capped at [limit]. For a central-log
+     * exporter to consume without re-sending or needing its own outbox: the cursor it
+     * persists is the [LogEvent.seq] of the last entry it exported successfully.
+     */
+    fun readSince(context: Context, afterSeq: Long, limit: Int): List<LogEvent> {
+        val sp = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val array = readArray(sp.getString(KEY, null))
+        val out = ArrayList<LogEvent>()
+        for (i in 0 until array.length()) {
+            val o = array.optJSONObject(i) ?: continue
+            val seq = o.optLong("s")
+            if (seq <= afterSeq) continue
+            out.add(
+                LogEvent(
+                    timestamp = o.optLong("t"),
+                    level = runCatching { EventLevel.valueOf(o.optString("l")) }.getOrDefault(EventLevel.INFO),
+                    message = o.optString("m"),
+                    seq = seq
+                )
+            )
+            if (out.size >= limit) break
+        }
         return out
     }
 

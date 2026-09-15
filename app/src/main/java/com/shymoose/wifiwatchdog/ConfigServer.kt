@@ -597,6 +597,21 @@ object ConfigServer {
             )
         ),
         Section(
+            "Recovery", "Reboot recovery (last resort)", listOf(
+                Field(
+                    Prefs.KEY_REBOOT_ENABLED, "Allow reboot recovery", Kind.BOOL,
+                    "Off by default. Only enable for a device confirmed to keep network ADB over " +
+                        "TCP after a reboot on its own — otherwise a reboot that does not fix the " +
+                        "fault permanently strands the device.",
+                    Prefs.DEFAULT_REBOOT_ENABLED.toString()
+                ),
+                Field(
+                    Prefs.KEY_REBOOT_AFTER_CYCLES, "Reboot after (failed airplane cycles)", Kind.NUMBER,
+                    "1–20.", Prefs.DEFAULT_REBOOT_AFTER_CYCLES.toString()
+                )
+            )
+        ),
+        Section(
             "Recovery", "Airplane cycle", listOf(
                 Field(
                     Prefs.KEY_AIRPLANE_ENABLED, "Enable airplane cycle", Kind.BOOL,
@@ -636,6 +651,24 @@ object ConfigServer {
                     Prefs.KEY_HEARTBEAT_INTERVAL, "Interval (s)", Kind.NUMBER,
                     "30–86400. Keep it well under the monitor's own interval.",
                     Prefs.DEFAULT_HEARTBEAT_INTERVAL.toString()
+                )
+            )
+        ),
+        Section(
+            "Reporting", "Central log export (OTLP)", listOf(
+                Field(
+                    Prefs.KEY_OTLP_ENDPOINT, "Endpoint", Kind.TEXT,
+                    "Root OTLP/HTTP URL, e.g. https://host:5080/api/default. " +
+                        "\"/v1/logs\" is appended automatically. Blank disables export."
+                ),
+                Field(
+                    Prefs.KEY_OTLP_AUTH, "Authorization header", Kind.PASSWORD,
+                    "Sent verbatim, e.g. \"Basic ...\" or \"Bearer ...\". Blank leaves the stored value alone."
+                ),
+                Field(
+                    Prefs.KEY_OTLP_STREAM, "Stream name", Kind.TEXT,
+                    "Sent as the OpenObserve \"stream-name\" header; ignored by receivers that don't use it.",
+                    Prefs.DEFAULT_OTLP_STREAM
                 )
             )
         ),

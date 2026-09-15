@@ -266,6 +266,30 @@ class WifiRecovery internal constructor(
         return hardReset()
     }
 
+    /**
+     * Last-of-last-resort: a full device reboot via the power menu's "Restart",
+     * driven through the install-auto-click accessibility service.
+     *
+     * Restarts `wificond` and every other system daemon a driver reload or an
+     * airplane cycle leaves untouched. Only ever called when
+     * [Prefs.rebootEnabled] is on, which is itself only meant to be turned on
+     * for a device confirmed to bring network adb back on its own afterwards -
+     * this class has no way to verify that, so the caller carries that
+     * responsibility.
+     */
+    fun reboot(): Boolean {
+        if (InstallAutoClickService.bound == null) {
+            EventLog.add(appContext, EventLevel.WARN, "Reboot skipped — accessibility service not bound")
+            return false
+        }
+        EventLog.add(appContext, EventLevel.ACTION, "Requesting reboot via power menu")
+        val tapped = InstallAutoClickService.requestReboot()
+        if (!tapped) {
+            EventLog.add(appContext, EventLevel.ERROR, "Reboot request failed — power menu did not open or Restart was not found")
+        }
+        return tapped
+    }
+
     companion object {
         private const val SCAN_ALWAYS = "wifi_scan_always_enabled"
         private const val SOFT_OFF_MS = 3_000L

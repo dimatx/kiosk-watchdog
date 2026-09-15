@@ -60,6 +60,14 @@ open class InstallAutoClickService : AccessibilityService() {
     @Volatile
     private var lastClickAt = 0L
 
+    /** Set for the duration of one [requestReboot] call; see [sweepRebootOnMain]. */
+    @Volatile
+    private var rebootPending = false
+    @Volatile
+    private var rebootDeadline = 0L
+    @Volatile
+    private var rebootClicked = false
+
     /** Everything that touches the node tree runs here, so nothing races. */
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -84,7 +92,11 @@ open class InstallAutoClickService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         serviceInfo = serviceInfo.apply {
-            packageNames = (resolveInstallers(this@InstallAutoClickService) + WifiEnablePrompt.PACKAGE).toTypedArray()
+            packageNames = (
+                resolveInstallers(this@InstallAutoClickService) +
+                    WifiEnablePrompt.PACKAGE +
+                    SYSTEMUI_PACKAGE
+                ).toTypedArray()
             flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
         }
         instance = this
@@ -148,6 +160,35 @@ open class InstallAutoClickService : AccessibilityService() {
             root.recycle()
         }
     }
+
+    /**
+     * Taps "Restart" in the power menu opened by [requestReboot].
+     *
+     * The label sits on a non-clickable child, same as every other dialog this
+     * service drives - [clickable] walks up to the real button. "Power off" is
+     * never matched, so a malformed search can only ever find nothing rather
+     * than shut the device down instead of restarting it.
+     */
+    private fun sweepRebootOnMain() {
+        if (!rebootPending) return
+        if (SystemClock.elapsedRealtime() > rebootDeadline) {
+            rebootPending = false
+            return
+        }
+        val root = rootInActiveWindow ?: return
+        try {
+            val label = findNode(root, setOf("restart"), emptyList()) ?: return
+            val target = clickable(label) ?: return
+            if (target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                rebootPending = false
+                rebootClicked = true
+                EventLog.add(this, EventLevel.ACTION, "Tapped Restart in the power menu")
+            }
+        } finally {
+            root.recycle()
+        }
+    }
+
 
     private fun sweepOnMain() {
         sweepWifiOnMain()
@@ -237,6 +278,10 @@ open class InstallAutoClickService : AccessibilityService() {
         if (event == null) return
         if (event.packageName?.toString() == WifiEnablePrompt.PACKAGE) {
             sweepWifiOnMain()
+            return
+        }
+        if (event.packageName?.toString() == SYSTEMUI_PACKAGE && rebootPending) {
+            main.post { sweepRebootOnMain() }
             return
         }
         if (!Prefs(this).autoInstallEnabled) return
@@ -456,6 +501,45 @@ open class InstallAutoClickService : AccessibilityService() {
             val service = instance ?: return
             service.main.post { service.sweepWifiOnMain() }
         }
+
+        private const val SYSTEMUI_PACKAGE = "com.android.systemui"
+
+        /** How long to wait for the power menu to appear and be tapped. */
+        private const val REBOOT_DIALOG_TIMEOUT_MS = 8_000L
+        private const val REBOOT_POLL_MS = 150L
+
+        /**
+         * Opens the power menu through the accessibility global-action API and
+         * taps "Restart" - the same option a physical long-press on the power
+         * button offers.
+         *
+         * Deliberately not a simulated power keyevent: those are read by the
+         * framework's own press-counting gesture detector, which can misfire as
+         * the "double-press to launch camera" shortcut. [GLOBAL_ACTION_POWER_DIALOG]
+         * asks for the dialog directly, bypassing that detector entirely.
+         *
+         * Blocks the caller until the tap lands or the dialog never showed up.
+         * A confirmed tap is the last thing this returns before the reboot itself
+         * tears the process down, so there is nothing further to observe.
+         */
+        fun requestReboot(): Boolean {
+            val service = instance ?: return false
+            service.rebootClicked = false
+            service.rebootDeadline = SystemClock.elapsedRealtime() + REBOOT_DIALOG_TIMEOUT_MS
+            service.rebootPending = true
+            val opened = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_POWER_DIALOG)
+            if (!opened) {
+                service.rebootPending = false
+                return false
+            }
+            val deadline = service.rebootDeadline + 1_000L
+            while (!service.rebootClicked && SystemClock.elapsedRealtime() < deadline) {
+                Thread.sleep(REBOOT_POLL_MS)
+            }
+            service.rebootPending = false
+            return service.rebootClicked
+        }
+
 
         /**
          * The package owning the window in front, or null when that cannot be

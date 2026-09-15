@@ -71,6 +71,43 @@ class ReportingHttpTest {
         )
     }
 
+    @Test
+    fun `an explicit Content-Type header reaches the wire exactly, with no charset appended`() {
+        // Some real OTLP receivers (OpenObserve) 400 a request the instant a
+        // charset parameter shows up on Content-Type, so this has to be exact -
+        // not just "starts with application/json".
+        Endpoint { socket, _ ->
+            socket.getOutputStream().apply {
+                write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                flush()
+            }
+        }.use { endpoint ->
+            ReportingHttp.send(
+                ReportingRequest(endpoint.url, body = "{}", headers = mapOf("Content-Type" to "application/json"))
+            )
+            assertTrue(
+                "expected an exact application/json Content-Type with no charset, got: ${endpoint.capturedHeaders}",
+                endpoint.capturedHeaders.any { it.equals("Content-Type: application/json", ignoreCase = true) }
+            )
+        }
+    }
+
+    @Test
+    fun `a request with no Content-Type header still defaults to text-plain`() {
+        Endpoint { socket, _ ->
+            socket.getOutputStream().apply {
+                write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                flush()
+            }
+        }.use { endpoint ->
+            ReportingHttp.send(ReportingRequest(endpoint.url, body = "hello"))
+            assertTrue(
+                "expected a text/plain Content-Type, got: ${endpoint.capturedHeaders}",
+                endpoint.capturedHeaders.any { it.startsWith("Content-Type: text/plain", ignoreCase = true) }
+            )
+        }
+    }
+
     internal class Endpoint(script: (Socket, CountDownLatch) -> Unit) : AutoCloseable {
         private val listener = ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
         private val accepted = AtomicReference<Socket>()
@@ -79,6 +116,9 @@ class ReportingHttpTest {
         private val worker = Executors.newSingleThreadExecutor()
         val url = "http://127.0.0.1:${listener.localPort}/"
 
+        /** Raw request-header lines seen before the blank line, for tests that assert on them. */
+        val capturedHeaders = java.util.Collections.synchronizedList(mutableListOf<String>())
+
         init {
             worker.submit {
                 try {
@@ -86,7 +126,11 @@ class ReportingHttpTest {
                         accepted.set(socket)
                         socket.soTimeout = 2_000
                         val input = socket.getInputStream().bufferedReader()
-                        while (!input.readLine().isNullOrEmpty()) Unit
+                        while (true) {
+                            val line = input.readLine() ?: break
+                            if (line.isEmpty()) break
+                            capturedHeaders.add(line)
+                        }
                         script(socket, finished)
                     }
                 } catch (e: SocketException) {
