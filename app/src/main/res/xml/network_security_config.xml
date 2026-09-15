@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  This app treats every user-supplied endpoint (ntfy server, heartbeat webhook,
+  probe host, OTLP endpoint) as opaque and unopinionated about scheme - plenty
+  of legitimate targets are plain HTTP on a LAN (an internal Vector/OpenObserve
+  instance, a self-hosted ntfy, a heartbeat monitor on the same network).
+
+  Without this, the platform default for targetSdkVersion 28+ silently blocks
+  all cleartext traffic on stock Android and most OEM builds. It happened not
+  to matter historically because ntfy/heartbeat were usually configured with
+  https:// URLs, and went unnoticed on the LineageOS displays this project was
+  built against - LineageOS ships a permissive base config - but it firmly
+  blocks a plain http:// OTLP endpoint on stock Android 13, Fire OS, and any
+  other device using the platform default.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
