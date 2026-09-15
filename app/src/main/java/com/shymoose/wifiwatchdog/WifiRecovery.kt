@@ -276,15 +276,31 @@ class WifiRecovery internal constructor(
      * for a device confirmed to bring network adb back on its own afterwards -
      * this class has no way to verify that, so the caller carries that
      * responsibility.
+     *
+     * @param recoveryDownSec How long the link has been down, when this reboot
+     * is an escalation step trying to fix that outage. Persisted so the outage
+     * can be reported with its real duration once the device comes back up -
+     * see [Prefs.rebootRecoveryPending]. Left null for a manual/test reboot,
+     * which has no outage to recover from and should not be reported as one.
      */
-    fun reboot(): Boolean {
+    fun reboot(recoveryDownSec: Long? = null): Boolean {
         if (InstallAutoClickService.bound == null) {
             EventLog.add(appContext, EventLevel.WARN, "Reboot skipped — accessibility service not bound")
             return false
         }
+        val prefs = Prefs(appContext)
+        if (recoveryDownSec != null) {
+            // Written before the request, not after: the tap can succeed and the
+            // reboot can begin before this function ever gets to return.
+            prefs.rebootRecoveryDownSec = recoveryDownSec
+            prefs.rebootRecoveryPending = true
+        }
         EventLog.add(appContext, EventLevel.ACTION, "Requesting reboot via power menu")
         val tapped = InstallAutoClickService.requestReboot()
         if (!tapped) {
+            // No reboot is actually going to happen, so nothing should be
+            // reported as recovered from one later.
+            if (recoveryDownSec != null) prefs.rebootRecoveryPending = false
             EventLog.add(appContext, EventLevel.ERROR, "Reboot request failed — power menu did not open or Restart was not found")
         }
         return tapped

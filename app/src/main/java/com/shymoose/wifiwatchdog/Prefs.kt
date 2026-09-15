@@ -235,6 +235,27 @@ class Prefs(context: Context) {
     val rebootAfterCycles: Int
         get() = intPref(KEY_REBOOT_AFTER_CYCLES, DEFAULT_REBOOT_AFTER_CYCLES, 1, 20)
 
+    /**
+     * Set just before a reboot is requested to recover from an outage, together
+     * with how long the link had already been down ([rebootRecoveryDownSec]).
+     *
+     * Read once at the first healthy tick after boot so that recovery can be
+     * reported with the outage's real duration. The in-memory escalation state
+     * ([WatchdogService.State]) a normal recovery relies on does not survive the
+     * reboot that is supposed to fix it, so this is what stands in for it across
+     * that boundary. Committed, for the same reason every other flag that must
+     * survive a reboot is: an asynchronous write is exactly what gets lost when
+     * the reboot it is meant to describe actually happens.
+     */
+    var rebootRecoveryPending: Boolean
+        get() = sp.getBoolean(KEY_REBOOT_RECOVERY_PENDING, false)
+        set(value) = sp.edit().putBoolean(KEY_REBOOT_RECOVERY_PENDING, value).commit().let { }
+
+    /** How long the link had been down when [rebootRecoveryPending] was set. */
+    var rebootRecoveryDownSec: Long
+        get() = sp.getLong(KEY_REBOOT_RECOVERY_DOWN_SEC, 0L)
+        set(value) = sp.edit().putLong(KEY_REBOOT_RECOVERY_DOWN_SEC, value).commit().let { }
+
     /** Package to put back in front; blank turns the behaviour off. */
     val kioskPackage: String
         get() = sp.getString(KEY_KIOSK_PACKAGE, DEFAULT_KIOSK_PACKAGE)!!.trim()
@@ -287,6 +308,8 @@ class Prefs(context: Context) {
         const val KEY_RESTORE_NETWORK_ADB = "restore_network_adb"
         const val KEY_REBOOT_ENABLED = "reboot_enabled"
         const val KEY_REBOOT_AFTER_CYCLES = "reboot_after_cycles"
+        private const val KEY_REBOOT_RECOVERY_PENDING = "reboot_recovery_pending"
+        private const val KEY_REBOOT_RECOVERY_DOWN_SEC = "reboot_recovery_down_sec"
         const val KEY_KIOSK_PACKAGE = "kiosk_package"
         const val KEY_KIOSK_RETURN_MIN = "kiosk_return_after_min"
         const val KEY_AUTO_INSTALL_ALLOWLIST = "auto_install_allowlist"

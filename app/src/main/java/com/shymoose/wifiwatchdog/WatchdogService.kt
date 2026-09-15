@@ -199,14 +199,22 @@ class WatchdogService : Service() {
         Vitals.record(this, State.wifi, State.stage, reachable)
 
         if (reachable) {
-            if (State.stage > 0 || State.consecutiveFailures > 0) {
-                val downFor = observedDownSec(now)
+            // A reboot wipes State along with everything else, so the normal
+            // "was this actually down" check above cannot see across it. This is
+            // what stands in for that state on the one recovery path that does
+            // not survive in the same process it started in.
+            val rebootRecovery = prefs.rebootRecoveryPending
+            if (State.stage > 0 || State.consecutiveFailures > 0 || rebootRecovery) {
+                val downFor = if (rebootRecovery) prefs.rebootRecoveryDownSec else observedDownSec(now)
                 EventLog.add(this, EventLevel.INFO, "Connectivity restored after ${formatDuration(downFor)}")
                 // Only worth telling anyone about if they were told it was down.
                 // A stall that cleared before the ladder touched anything is not
-                // a recovery, it is a link that was never actually broken.
-                if (State.reportedLost) report("recovered", downFor)
+                // a recovery, it is a link that was never actually broken. A
+                // reboot recovery is always worth reporting: the outage that led
+                // to it was already reported before the reboot happened.
+                if (State.reportedLost || rebootRecovery) report("recovered", downFor)
             }
+            if (rebootRecovery) prefs.rebootRecoveryPending = false
             // The link is up: this is the only moment queued notifications can go out.
             // Independent reporters cannot delay this tick or one another.
             // Automatic heartbeats are skipped, not queued, while a send is busy.
@@ -382,7 +390,7 @@ class WatchdogService : Service() {
 
             else -> if (now >= State.nextHardResetAt) {
                 if (rebootUsable() && State.airplaneCycleAttempts >= prefs.rebootAfterCycles) {
-                    val completed = act(downSec) { recovery.reboot() }
+                    val completed = act(downSec) { recovery.reboot(recoveryDownSec = downSec) }
                     report("reboot", downSec, completed)
                     if (completed) return
                     // The reboot request itself failed (dialog never opened, or
@@ -550,7 +558,11 @@ class WatchdogService : Service() {
                 priority = priority,
                 tags = tags,
                 at = at
-            )
+            ),
+            // Reported right before a reboot that may kill this process within
+            // moments of returning - an unflushed asynchronous write is exactly
+            // what that reboot would lose.
+            durable = (event == "reboot")
         )
     }
 

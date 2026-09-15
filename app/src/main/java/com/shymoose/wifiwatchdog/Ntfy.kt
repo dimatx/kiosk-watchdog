@@ -48,8 +48,17 @@ object Ntfy {
 
     // ------------------------------------------------------------------ queue
 
-    /** Queues a message. Delivery happens on the next successful [flush]. */
-    fun enqueue(context: Context, message: Message) {
+    /**
+     * Queues a message. Delivery happens on the next successful [flush].
+     *
+     * @param durable Commit the write instead of merely scheduling it. The
+     * default asynchronous write is fine for everything reported while the
+     * process is going to keep running - but a message reported right before a
+     * deliberate reboot is racing the very event it describes, and an
+     * unflushed [android.content.SharedPreferences.Editor.apply] is exactly
+     * what a reboot can lose.
+     */
+    fun enqueue(context: Context, message: Message, durable: Boolean = false) {
         val prefs = Prefs(context)
         if (!prefs.ntfyConfigured) return
 
@@ -69,7 +78,8 @@ object Ntfy {
             val trimmed = JSONArray()
             val start = (array.length() - MAX_QUEUED).coerceAtLeast(0)
             for (i in start until array.length()) trimmed.put(array.optJSONObject(i) ?: continue)
-            sp.edit().putString(KEY_OUTBOX, trimmed.toString()).apply()
+            val editor = sp.edit().putString(KEY_OUTBOX, trimmed.toString())
+            if (durable) editor.commit() else editor.apply()
         }
     }
 
