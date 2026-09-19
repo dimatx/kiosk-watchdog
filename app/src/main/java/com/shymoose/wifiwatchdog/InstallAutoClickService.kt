@@ -315,6 +315,13 @@ open class InstallAutoClickService : AccessibilityService() {
 
         val texts = collectText(root)
 
+        // Actively installing: the installer is doing work, not stuck, so this
+        // must not spend the fruitless-sweep budget - see [IN_PROGRESS_MARKERS].
+        if (texts.any { it in IN_PROGRESS_MARKERS }) {
+            fruitlessSweeps = 0
+            return
+        }
+
         // Completion screen first: it has no allowlist-bearing prompt text, and
         // reaching it means we already approved whatever is on it. Recognised by
         // its buttons as well as its wording, since the wording is localised and
@@ -604,7 +611,22 @@ open class InstallAutoClickService : AccessibilityService() {
         }
 
         /** Strings that only appear once the install has already run. */
-        private val COMPLETION_MARKERS = setOf("App installed.", "App installed", "Installing…", "Installing...")
+        private val COMPLETION_MARKERS = setOf("App installed.", "App installed")
+
+        /**
+         * Strings shown while the install is actively progressing.
+         *
+         * Not a dead end - the installer is doing work - so seeing one of these
+         * must not count against [MAX_FRUITLESS_SWEEPS]. These used to be lumped
+         * into [COMPLETION_MARKERS], which mistook the progress screen for the
+         * completion screen: nothing on it is clickable, so every sweep while an
+         * install was merely slow (or its progress text changed) burned through
+         * the fruitless-sweep budget. By the time the real completion screen -
+         * with its OPEN button - appeared, the budget was already spent and
+         * [handle] stopped looking at the window at all, leaving the device
+         * stuck showing it.
+         */
+        private val IN_PROGRESS_MARKERS = setOf("Installing…", "Installing...")
 
         /** When to look at an already-visible window after connecting. */
         private val SWEEP_DELAYS_MS = longArrayOf(1_000L, 3_000L, 8_000L)

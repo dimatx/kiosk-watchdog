@@ -159,7 +159,22 @@ object AccessibilityBinding {
         val prefs = Prefs(context)
         if (!prefs.autoInstallEnabled) return
         if (!isEnabled(context) && !prefs.autoInstallServiceEverOn) return
-        if (!AirplaneMode.hasPermission(context)) return
+        if (!AirplaneMode.hasPermission(context)) {
+            // No WRITE_SECURE_SETTINGS on this device - a Fire tablet, typically,
+            // since it can never be granted there over adb - so the rewrite below
+            // can never run. Returning silently here was the bug: the framework
+            // can still drop this service from the enabled list on its own (a
+            // force-stop, another app's accessibility service arriving, ...), and
+            // with no repair possible and nothing ever reported, an install dialog
+            // sat unconfirmed on a wall display with zero signal that anything was
+            // wrong. Reported at the same floor as a real repair attempt, so it
+            // still costs at most one entry per outage.
+            val now = SystemClock.elapsedRealtime()
+            if (now < nextRepairAt) return
+            nextRepairAt = now + REPAIR_MIN_INTERVAL_MS
+            reportUnrepairable(context)
+            return
+        }
 
         // The framework rebinds on its own after a package replace, and a tick
         // can land while that is still in flight. Rewriting the setting then
@@ -234,6 +249,27 @@ object AccessibilityBinding {
             context,
             EventLevel.WARN,
             "Auto-install service will not start — restart the device to clear it"
+        )
+    }
+
+    /**
+     * Said once per outage on a device where no repair is even possible.
+     *
+     * Distinct from [reportStuck]: that one follows a failed rewrite attempt, so
+     * "restart the device" is honest advice - the setting is right and only the
+     * bind is stuck. Here the setting was never touched at all, so the same
+     * advice would send someone to restart a device that comes back exactly as
+     * broken. The real fix is the manual toggle on the system Accessibility
+     * screen ([openAccessibilitySettings]).
+     */
+    private fun reportUnrepairable(context: Context) {
+        if (repairReported) return
+        repairReported = true
+        EventLog.add(
+            context,
+            EventLevel.WARN,
+            "Auto-install service is off and can't be re-enabled automatically on this device " +
+                "(no WRITE_SECURE_SETTINGS) — turn it back on in system Accessibility settings"
         )
     }
 
