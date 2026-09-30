@@ -37,6 +37,7 @@ class WatchdogService : Service() {
     /** Rate limit for asking the radio to scan while the link is healthy. */
     private var lastScanRequestAt: Long = 0L
     private var nextWifiEnableAt = 0L
+    private var nextBlindRebootAt = 0L
     private var wifiEnableFailureReported = false
 
     /** What the ongoing notification currently says, so identical updates are dropped. */
@@ -87,6 +88,8 @@ class WatchdogService : Service() {
             else -> {
                 if (State.startedAt == 0L) {
                     State.startedAt = System.currentTimeMillis()
+                    State.startedElapsed = SystemClock.elapsedRealtime()
+                    State.lastGoodElapsed = State.startedElapsed
                     EventLog.add(this, EventLevel.INFO, "Watchdog started")
                 }
                 // A reboot or crash during an airplane cycle would otherwise leave
@@ -164,6 +167,7 @@ class WatchdogService : Service() {
 
     private fun tick() {
         val now = System.currentTimeMillis()
+        val elapsed = SystemClock.elapsedRealtime()
         if (prefs.lastGoodAtMillis == 0L) prefs.lastGoodAtMillis = now
 
         // Written every check so that if the device stops responding, the last
@@ -205,7 +209,7 @@ class WatchdogService : Service() {
             // not survive in the same process it started in.
             val rebootRecovery = prefs.rebootRecoveryPending
             if (State.stage > 0 || State.consecutiveFailures > 0 || rebootRecovery) {
-                val downFor = if (rebootRecovery) prefs.rebootRecoveryDownSec else observedDownSec(now)
+                val downFor = if (rebootRecovery) prefs.rebootRecoveryDownSec else                 observedDownSec(elapsed)
                 EventLog.add(this, EventLevel.INFO, "Connectivity restored after ${formatDuration(downFor)}")
                 // Only worth telling anyone about if they were told it was down.
                 // A stall that cleared before the ladder touched anything is not
@@ -220,6 +224,7 @@ class WatchdogService : Service() {
             // Automatic heartbeats are skipped, not queued, while a send is busy.
             Reporting.onHealthyProbe(this, rttMs)
             prefs.lastGoodAtMillis = now
+            State.lastGoodElapsed = elapsed
             State.consecutiveFailures = 0
             State.stage = 0
             State.airplaneCycleAttempts = 0
@@ -233,7 +238,7 @@ class WatchdogService : Service() {
             return
         }
         State.consecutiveFailures++
-        val downSec = observedDownSec(now)
+        val downSec = observedDownSec(elapsed)
         State.summary = getString(R.string.status_offline)
         State.detail = getString(R.string.status_detail_offline, formatDuration(downSec))
 
@@ -246,7 +251,7 @@ class WatchdogService : Service() {
             EventLog.add(this, EventLevel.WARN, "Cannot reach $label")
         }
 
-        escalate(downSec, now)
+        escalate(downSec, elapsed)
     }
 
     /**
@@ -322,12 +327,10 @@ class WatchdogService : Service() {
      * configured delays mean "how long have I seen this down", which is the only
      * thing that can honestly be measured.
      */
-    private fun observedDownSec(now: Long): Long {
-        val sinceLastGood = (now - prefs.lastGoodAtMillis) / 1000
-        val startedAt = State.startedAt
-        if (startedAt <= 0L) return 0
-        val sinceStart = (now - startedAt) / 1000
-        return minOf(sinceLastGood, sinceStart).coerceAtLeast(0)
+    private fun observedDownSec(elapsed: Long): Long {
+        if (State.startedElapsed <= 0L) return 0
+        val since = maxOf(State.startedElapsed, State.lastGoodElapsed)
+        return ((elapsed - since) / 1000).coerceAtLeast(0)
     }
 
     private fun escalate(downSec: Long, now: Long) {
@@ -359,6 +362,18 @@ class WatchdogService : Service() {
         // Blindness is re-confirmed after every action, so this cannot run two
         // resets back to back: the settle window clears the count first.
         val blind = State.blind
+
+        // On the ThinkSmart View a blind radio has only ever been cured by a
+        // reboot: every driver unload and airplane cycle logged against one
+        // failed to restore scanning, and on one occasion unloading the wedged
+        // driver hung the whole device until it was power-cycled by hand.
+        // Reboot straight away when that is possible.
+        if (blind && rebootUsable() && now >= nextBlindRebootAt) {
+            nextBlindRebootAt = now + BLIND_REBOOT_RETRY_MS
+            val completed = act(downSec) { recovery.reboot(recoveryDownSec = downSec) }
+            report("reboot", downSec, completed)
+            if (completed) return
+        }
 
         when (State.stage) {
             0 -> if (downSec >= prefs.reassociateAfterSec) {
@@ -669,6 +684,12 @@ class WatchdogService : Service() {
     /** Cross-instance state; the service may be recreated while the process lives on. */
     object State {
         var startedAt: Long = 0L
+
+        // Outage timing uses the monotonic clock: a tablet that boots with no
+        // network has no time source, so the wall clock reads 1970 and jumps
+        // when it is finally set.
+        var startedElapsed: Long = 0L
+        var lastGoodElapsed: Long = 0L
         var lastCheckAt: Long = 0L
         var online: Boolean = true
         var consecutiveFailures: Int = 0
@@ -771,6 +792,7 @@ class WatchdogService : Service() {
          * an hour between attempts.
          */
         private const val BLIND_MAX_BACKOFF_SEC = 300
+        private const val BLIND_REBOOT_RETRY_MS = 300_000L
 
         fun start(context: Context) {
             val intent = Intent(context, WatchdogService::class.java)

@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -208,8 +209,9 @@ class MainActivity : AppCompatActivity() {
             if (online) {
                 getString(R.string.status_detail_online, target)
             } else {
-                val down = if (prefs.lastGoodAtMillis > 0) {
-                    (System.currentTimeMillis() - prefs.lastGoodAtMillis) / 1000
+                val since = maxOf(state.startedElapsed, state.lastGoodElapsed)
+                val down = if (since > 0) {
+                    ((SystemClock.elapsedRealtime() - since) / 1000).coerceAtLeast(0)
                 } else 0
                 getString(R.string.status_detail_offline_full, target, WatchdogService.formatDuration(down))
             }
