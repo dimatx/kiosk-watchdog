@@ -46,6 +46,16 @@ class SettingsActivity :
         return true
     }
 
+    override fun onResume() {
+        super.onResume()
+        KioskReturn.noteShown()
+    }
+
+    override fun onPause() {
+        KioskReturn.noteHidden(this)
+        super.onPause()
+    }
+
     /** Keeps the return-to-kiosk timer from firing mid-configuration. */
     override fun onUserInteraction() {
         super.onUserInteraction()

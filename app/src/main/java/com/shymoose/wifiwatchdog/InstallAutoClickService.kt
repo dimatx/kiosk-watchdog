@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 
 /**
  * Outcome of asking for the accessibility service to be turned on.
@@ -97,7 +98,12 @@ open class InstallAutoClickService : AccessibilityService() {
                     WifiEnablePrompt.PACKAGE +
                     SYSTEMUI_PACKAGE
                 ).toTypedArray()
-            flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+            // FLAG_RETRIEVE_INTERACTIVE_WINDOWS is for [foregroundPackage]: some
+            // builds (Fire OS 7) never report an active window to a service
+            // filtered by package, but still list the windows on screen.
+            flags = flags or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         }
         instance = this
         Prefs(this).autoInstallServiceEverOn = true
@@ -553,7 +559,21 @@ open class InstallAutoClickService : AccessibilityService() {
          * determined - which is the case whenever the service is not bound.
          */
         fun foregroundPackage(): String? = runCatching {
-            val root = instance?.rootInActiveWindow ?: return null
+            val service = instance ?: return null
+            service.rootInActiveWindow?.let { root ->
+                try {
+                    root.packageName?.toString()?.let { return it }
+                } finally {
+                    root.recycle()
+                }
+            }
+            // Some builds report no active window at all; fall back to the
+            // window list, preferring the active one, then the focused app.
+            val windows = service.windows
+            val pick = windows.firstOrNull { it.isActive }
+                ?: windows.firstOrNull { it.isFocused && it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+                ?: windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            val root = pick?.root ?: return null
             try {
                 root.packageName?.toString()
             } finally {

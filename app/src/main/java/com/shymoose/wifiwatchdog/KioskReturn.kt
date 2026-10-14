@@ -33,9 +33,10 @@ import android.os.SystemClock
  * returns only the caller's own processes. It does not need to be, since a dead
  * kiosk lands on the launcher, which is the case above.
  *
- * Detection rides on the accessibility service, which already knows which window
- * is in front, so this needs no additional permission. Without that service
- * bound the feature simply does not run.
+ * Detection of everything else rides on the accessibility service, which
+ * already knows which window is in front, so this needs no additional
+ * permission. This app's own screens are tracked directly, so returning from
+ * them works even where that service is unbound or cannot read the front window.
  */
 object KioskReturn {
 
@@ -71,6 +72,23 @@ object KioskReturn {
         lastTouchAt = SystemClock.elapsedRealtime()
     }
 
+    /**
+     * Whether one of this app's screens is the one on top, known first-hand from
+     * its own lifecycle. Kept through the pause that switching the display off
+     * causes, since the screen is still what is showing once it is woken.
+     */
+    @Volatile
+    private var ownScreenOnTop = false
+
+    fun noteShown() {
+        ownScreenOnTop = true
+    }
+
+    fun noteHidden(context: Context) {
+        val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (power?.isInteractive != false) ownScreenOnTop = false
+    }
+
     fun check(context: Context) {
         val prefs = Prefs(context)
         val target = prefs.kioskPackage
@@ -84,24 +102,38 @@ object KioskReturn {
         // while the display sleeps, so walking up to a display that was left on
         // the wrong screen snaps it back rather than starting the clock again.
         val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-        if (power?.isInteractive == false) return
-
-        val front = InstallAutoClickService.foregroundPackage()
-        // A null reading is "not known", not "not the kiosk". The accessibility
-        // service may be unbound or between windows, and acting on that would
-        // relaunch the kiosk on top of whatever is genuinely showing.
-        if (front == null) return
-        // The status bar and keyguard sit in front of whatever is actually
-        // running, so they say nothing about it either way.
-        if (front == SYSTEM_UI) return
-
-        if (front == target) {
-            awaySince = 0L
-            reportedMissing = false
+        if (power?.isInteractive == false) {
+            // Start the clock for our own screen even in the dark, so a display
+            // that went to sleep right after landing here is not left showing it
+            // for the whole delay again once someone wakes it.
+            if (ownScreenOnTop && awaySince == 0L) awaySince = SystemClock.elapsedRealtime()
             return
         }
 
-        val ours = front == context.packageName
+        val front = InstallAutoClickService.foregroundPackage()
+        // This app's own screens are known first-hand, so being stranded on
+        // them never depends on the accessibility service: some builds (Fire
+        // OS 7) bind it yet never report which window is in front, and a pulled
+        // down shade reports System UI, either of which left the display on
+        // this app indefinitely. A reading that names some other app still
+        // wins, in case something opened over this one while the screen was off.
+        val ours = front == context.packageName ||
+            (ownScreenOnTop && (front == null || front == SYSTEM_UI))
+        if (!ours) {
+            // A null reading is "not known", not "not the kiosk". The service
+            // may be unbound or between windows, and acting on that would
+            // relaunch the kiosk on top of whatever is genuinely showing.
+            if (front == null) return
+            // The status bar and keyguard sit in front of whatever is actually
+            // running, so they say nothing about it either way.
+            if (front == SYSTEM_UI) return
+            if (front == target) {
+                awaySince = 0L
+                reportedMissing = false
+                return
+            }
+        }
+
         val waitMs = when {
             ours -> afterMs
             front == launcherPackage(context) -> LAUNCHER_GRACE_MS

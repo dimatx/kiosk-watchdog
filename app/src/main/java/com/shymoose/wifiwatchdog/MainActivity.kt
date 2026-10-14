@@ -121,10 +121,16 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onResume() {
         super.onResume()
+        KioskReturn.noteShown()
         EventLog.addListener(logListener)
         refresh()
         handler.removeCallbacks(ticker)
         handler.post(ticker)
+    }
+
+    override fun onPause() {
+        KioskReturn.noteHidden(this)
+        super.onPause()
     }
 
     /** Keeps the return-to-kiosk timer from firing while someone is using this. */
