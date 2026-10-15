@@ -571,6 +571,11 @@ object ConfigServer {
         Section(
             "Recovery", "Escalation", listOf(
                 Field(
+                    Prefs.KEY_RECOVERY_ENABLED, "Automatic Wi-Fi recovery", Kind.BOOL,
+                    "Off: monitor, log and alert only - never touch Wi-Fi.",
+                    Prefs.DEFAULT_RECOVERY_ENABLED.toString()
+                ),
+                Field(
                     Prefs.KEY_T_REASSOCIATE, "Reassociate after (s)", Kind.NUMBER,
                     "Rung 1: reconnect to the same AP.", Prefs.DEFAULT_T_REASSOCIATE.toString()
                 ),

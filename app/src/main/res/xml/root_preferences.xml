@@ -38,6 +38,11 @@
         app:summary="@string/screen_recovery_summary"
         app:title="@string/screen_recovery">
         <PreferenceCategory app:title="@string/cat_escalation">
+            <SwitchPreferenceCompat
+                app:defaultValue="true"
+                app:key="recovery_enabled"
+                app:summary="@string/pref_recovery_enabled_summary"
+                app:title="@string/pref_recovery_enabled" />
             <EditTextPreference
                 app:defaultValue="60"
                 app:key="t_reassociate_sec"

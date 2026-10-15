@@ -303,6 +303,11 @@ entirely. Reboot is the true last resort: it's off by default, and only worth en
 on a device confirmed to bring network ADB back on its own after a reboot — otherwise a
 reboot that doesn't fix the underlying fault permanently strands the display.
 
+**Automatic Wi-Fi recovery** switches the whole ladder off at once. The watchdog keeps
+probing, logging, alerting, sending heartbeats and returning to the kiosk, but never
+touches Wi-Fi — useful for seeing how a device copes on its own. Set
+`"recovery_enabled": false` through the browser setup page or `/import` to do it remotely.
+
 ### Why the gateway is the probe target
 
 The probe follows the Wi-Fi network's default gateway, discovered from `LinkProperties`

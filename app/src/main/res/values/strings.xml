@@ -83,6 +83,9 @@
     <string name="pref_interval_summary">Every %1$s seconds — how often the connection is tested.</string>
 
     <string name="cat_escalation">Recovery ladder</string>
+    <string name="pref_recovery_enabled">Automatic Wi-Fi recovery</string>
+    <string name="pref_recovery_enabled_summary">Off: keep checking, logging and alerting, but never touch Wi-Fi. Useful for seeing how a device copes on its own.</string>
+    <string name="log_recovery_disabled">Wi-Fi recovery is off — not intervening</string>
     <string name="pref_t_reassociate">Re-associate after (seconds down)</string>
     <string name="pref_t_reassociate_summary">After %1$s seconds down: ask Wi-Fi to rejoin the network. Nothing is torn down.</string>
     <string name="pref_t_soft">Wi-Fi off/on after (seconds down)</string>

@@ -45,6 +45,7 @@ class PreferenceDefaultsTest {
         Prefs.KEY_REBOOT_ENABLED to Prefs.DEFAULT_REBOOT_ENABLED.toString(),
         Prefs.KEY_REBOOT_AFTER_CYCLES to Prefs.DEFAULT_REBOOT_AFTER_CYCLES.toString(),
         Prefs.KEY_HARD_ENABLED to "true",
+        Prefs.KEY_RECOVERY_ENABLED to Prefs.DEFAULT_RECOVERY_ENABLED.toString(),
         Prefs.KEY_AIRPLANE_ENABLED to "true",
         Prefs.KEY_AUTO_INSTALL_ENABLED to "true",
         Prefs.KEY_KEEP_BT_OFF to Prefs.DEFAULT_KEEP_BT_OFF.toString(),

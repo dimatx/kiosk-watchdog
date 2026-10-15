@@ -39,6 +39,7 @@ class WatchdogService : Service() {
     private var nextWifiEnableAt = 0L
     private var nextBlindRebootAt = 0L
     private var wifiEnableFailureReported = false
+    private var recoveryDisabledLogged = false
 
     /** What the ongoing notification currently says, so identical updates are dropped. */
     private var lastNotifiedSummary: String? = null
@@ -233,6 +234,7 @@ class WatchdogService : Service() {
             State.nextHardResetAt = 0L
             nextWifiEnableAt = 0L
             wifiEnableFailureReported = false
+            recoveryDisabledLogged = false
             State.summary = getString(R.string.status_online)
             State.detail = getString(R.string.status_detail_online, label)
             return
@@ -334,6 +336,17 @@ class WatchdogService : Service() {
     }
 
     private fun escalate(downSec: Long, now: Long) {
+        // Every automatic action - including re-enabling a radio that is off and
+        // the blind-radio reboot - lives below, so this one check keeps the
+        // watchdog hands-off while outages are still detected and reported.
+        if (!prefs.recoveryEnabled) {
+            if (!recoveryDisabledLogged) {
+                EventLog.add(this, EventLevel.INFO, getString(R.string.log_recovery_disabled))
+                recoveryDisabledLogged = true
+            }
+            return
+        }
+
         // Cycling an already-disabled radio cannot repair an enable request
         // that is waiting for approval. Restore power before climbing the ladder.
         if (State.wifi?.wifiEnabled == false) {

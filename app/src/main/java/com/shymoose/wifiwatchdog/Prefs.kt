@@ -32,6 +32,14 @@ class Prefs(context: Context) {
     val checkIntervalSec: Int
         get() = intPref(KEY_INTERVAL, DEFAULT_INTERVAL, 10, 600)
 
+    /**
+     * Master switch for automatic Wi-Fi recovery. Off leaves the watchdog
+     * monitoring, logging and alerting, but it never touches the radio, so a
+     * device's own behaviour can be observed unaided.
+     */
+    val recoveryEnabled: Boolean
+        get() = sp.getBoolean(KEY_RECOVERY_ENABLED, DEFAULT_RECOVERY_ENABLED)
+
     val reassociateAfterSec: Int
         get() = intPref(KEY_T_REASSOCIATE, DEFAULT_T_REASSOCIATE, 15, 3600)
 
@@ -284,6 +292,7 @@ class Prefs(context: Context) {
         const val KEY_PROBE_HOST = "probe_host"
         const val KEY_PROBE_PORT = "probe_port"
         const val KEY_INTERVAL = "check_interval_sec"
+        const val KEY_RECOVERY_ENABLED = "recovery_enabled"
         const val KEY_T_REASSOCIATE = "t_reassociate_sec"
         const val KEY_T_SOFT = "t_soft_sec"
         const val KEY_T_HARD = "t_hard_sec"
@@ -373,5 +382,6 @@ class Prefs(context: Context) {
          */
         const val DEFAULT_KIOSK_PACKAGE = "me.jxl.kiosk_satellite"
         const val DEFAULT_KIOSK_RETURN_MIN = 5
+        const val DEFAULT_RECOVERY_ENABLED = true
     }
 }
